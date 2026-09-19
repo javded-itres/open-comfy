@@ -1,0 +1,182 @@
+default_image: flux-dev
+default_video: minimax-hailuo-02
+
+size_aliases:
+  "1024x1024": {width: 1024, height: 1024}
+  "16:9": {width: 1280, height: 720}
+  "9:16": {width: 720, height: 1280}
+  "720p": {width: 1280, height: 720}
+
+models:
+  - id: flux-dev
+    name: Flux Dev
+    aliases: ["Flux", "flux"]
+    modality: image
+    workflow: image_flux2_text_to_image_9b.json
+    output_mime: image/png
+    output_node: "9"
+    timeout_s: 180
+    pricing: {currency: USD, per_image: 0.02}
+    quality_map:
+      low: {steps: 8, cfg_scale: 1.0}
+    parameters:
+      - name: prompt
+        type: string
+        required: true
+        maps_to:
+          - {node: "76", field: value}
+      - name: negative_prompt
+        type: string
+        default: ""
+        maps_to:
+          - {node: "75:67", field: text}
+      - name: seed
+        type: integer
+        default: -1
+        maps_to:
+          - {node: "75:73", field: noise_seed}
+      - name: width
+        type: integer
+        default: 1024
+        maps_to:
+          - {node: "75:68", field: value}
+      - name: height
+        type: integer
+        default: 1024
+        maps_to:
+          - {node: "75:69", field: value}
+      - name: steps
+        type: integer
+        default: 20
+        maps_to:
+          - {node: "75:62", field: steps}
+      - name: cfg_scale
+        type: number
+        default: 5
+        maps_to:
+          - {node: "75:63", field: cfg}
+
+  - id: toy-image
+    name: Toy Image
+    modality: image
+    workflow: toy_image.json
+    output_mime: image/png
+    output_node: "9"
+    timeout_s: 30
+    pricing: {currency: USD, per_image: 0.02}
+    parameters:
+      - name: prompt
+        type: string
+        required: true
+        maps_to:
+          - {node: "6", field: text}
+      - name: seed
+        type: integer
+        default: -1
+        maps_to:
+          - {node: "3", field: seed}
+      - name: width
+        type: integer
+        default: 1024
+        maps_to:
+          - {node: "5", field: width}
+      - name: height
+        type: integer
+        default: 1024
+        maps_to:
+          - {node: "5", field: height}
+
+  - id: minimax-hailuo-02
+    name: Minimax H3
+    modality: video
+    workflow: minimax_h3_t2v.json
+    output_mime: video/mp4
+    output_node: "save_video"
+    timeout_s: 30
+    pricing: {currency: USD, per_second: 0.05}
+    parameters:
+      - name: prompt
+        type: string
+        required: true
+        maps_to:
+          - {node: "positive", field: text}
+      - name: seconds
+        type: integer
+        default: 6
+        enum: [5, 6, 10]
+        maps_to:
+          - {node: "length", field: value}
+      - name: input_image
+        type: image
+        required: false
+        maps_to:
+          - {node: "load_image", field: image}
+
+  - id: ltx2-i2v
+    name: LTX-2 I2V
+    modality: video
+    workflow: video_ltx2_i2v.json
+    output_mime: video/mp4
+    output_node: "5218"
+    timeout_s: 30
+    pricing: {currency: USD, per_second: 0.05}
+    parameters:
+      - name: prompt
+        type: string
+        required: true
+        maps_to:
+          - {node: "5330", field: value}
+      - name: negative_prompt
+        type: string
+        maps_to:
+          - {node: "5331", field: value}
+      - name: fps
+        type: integer
+        default: 24
+        maps_to:
+          - {node: "5222", field: Xf}
+      - name: seconds
+        type: integer
+        default: 6
+        maps_to:
+          - {node: "5219", field: Xf}
+          - {node: "5219", field: Xi}
+      - name: seed
+        type: integer
+        default: -1
+        maps_to:
+          - {node: "5243", field: seed}
+          - {node: "5189:5097", field: noise_seed}
+      - name: width
+        type: integer
+        default: 1280
+        maps_to:
+          - {node: "5223", field: width}
+      - name: height
+        type: integer
+        default: 720
+        maps_to:
+          - {node: "5223", field: height}
+      - name: input_image
+        type: image
+        required: true
+        maps_to:
+          - {node: "5180", field: image}
+
+  - id: nested-resize
+    name: Nested
+    modality: image
+    workflow: nested_resize.json
+    output_mime: image/png
+    output_node: "9"
+    timeout_s: 10
+    parameters:
+      - name: prompt
+        type: string
+        required: false
+        maps_to: []
+      - name: width
+        type: integer
+        default: 64
+        maps_to:
+          - {node: "10", field: resize_type, path: [width]}

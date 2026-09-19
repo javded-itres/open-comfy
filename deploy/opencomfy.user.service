@@ -1,0 +1,15 @@
+[Unit]
+Description=OpenComfy OpenAI-compatible ComfyUI gateway
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/opencomfy -config %h/.config/opencomfy/config.yaml
+Environment=OPENCOMFY_DATA=%h/.local/share/opencomfy
+Restart=on-failure
+RestartPreventExitStatus=2
+RestartSec=3
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

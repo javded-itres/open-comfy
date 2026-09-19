@@ -1,0 +1,14 @@
+/opencomfy
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+.DS_Store
+/data/
+/tmp/
+.env
+hmac.secret
+keys.yaml
+!configs/*.example.yaml
+docs/DESIGN.md

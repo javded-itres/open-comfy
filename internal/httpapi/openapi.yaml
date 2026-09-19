@@ -1,0 +1,400 @@
+openapi: 3.0.3
+info:
+  title: OpenComfy
+  description: |
+    OpenAI-compatible image/video API in front of ComfyUI.
+
+    1. Click **Authorize** and paste `sk-...` (or use the `X-Api-Key` header).
+    2. `GET /v1/models` to see configured workflows.
+    3. `POST /v1/images/generations` is synchronous (may take minutes).
+    4. `POST /v1/videos` returns `{status: queued}`; poll `GET /v1/videos/{id}` until `completed` (includes `url`).
+  version: 0.1.0
+servers:
+  - url: /
+    description: this server
+tags:
+  - name: meta
+  - name: models
+  - name: images
+  - name: videos
+  - name: chat
+security:
+  - bearerAuth: []
+  - apiKeyAuth: []
+paths:
+  /health:
+    get:
+      tags: [meta]
+      summary: Liveness
+      security: []
+      responses:
+        "200":
+          description: ok
+  /ready:
+    get:
+      tags: [meta]
+      summary: ComfyUI reachable
+      security: []
+      responses:
+        "200":
+          description: ready
+        "503":
+          description: ComfyUI unreachable
+  /openapi.json:
+    get:
+      tags: [meta]
+      summary: OpenAPI document
+      security: []
+      responses:
+        "200":
+          description: spec
+  /v1/models:
+    get:
+      tags: [models]
+      summary: List models
+      responses:
+        "200":
+          description: OpenAI-style list plus pricing extras
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/models/{id}:
+    get:
+      tags: [models]
+      summary: Get one model
+      parameters:
+        - $ref: "#/components/parameters/ModelId"
+      responses:
+        "200":
+          description: model
+        "404":
+          description: not found
+  /v1/images/models:
+    get:
+      tags: [models]
+      summary: Image model capabilities
+      responses:
+        "200":
+          description: OpenRouter-shaped image catalog
+  /v1/videos/models:
+    get:
+      tags: [models]
+      summary: Video model capabilities
+      responses:
+        "200":
+          description: OpenRouter-shaped video catalog
+  /v1/images/generations:
+    post:
+      tags: [images]
+      summary: Generate image (sync)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImageRequest"
+            examples:
+              flux:
+                value:
+                  model: toy-image
+                  prompt: a red cube on white, studio light
+                  size: 1024x1024
+                  n: 1
+                  response_format: b64_json
+      responses:
+        "200":
+          description: created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImageResponse"
+        "400":
+          $ref: "#/components/responses/APIError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /v1/videos:
+    get:
+      tags: [videos]
+      summary: List this key's video jobs
+      responses:
+        "200":
+          description: list
+    post:
+      tags: [videos]
+      summary: Create video job (async, always 200 queued)
+      parameters:
+        - in: query
+          name: wait
+          schema:
+            type: boolean
+          description: long-poll until completed/failed (capped by max_wait_s)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VideoRequest"
+            examples:
+              t2v:
+                value:
+                  model: minimax-hailuo-02
+                  prompt: ocean waves at sunset, cinematic
+                  seconds: "6"
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                model:
+                  type: string
+                prompt:
+                  type: string
+                seconds:
+                  type: string
+                input_reference:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: queued job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoJob"
+  /v1/videos/{id}:
+    get:
+      tags: [videos]
+      summary: Job status (completed includes url)
+      parameters:
+        - $ref: "#/components/parameters/VideoId"
+      responses:
+        "200":
+          description: job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoJob"
+        "404":
+          description: not found
+    delete:
+      tags: [videos]
+      summary: Cancel job
+      parameters:
+        - $ref: "#/components/parameters/VideoId"
+      responses:
+        "200":
+          description: cancelled
+  /v1/videos/{id}/content:
+    get:
+      tags: [videos]
+      summary: Download bytes (OpenAI SDK)
+      parameters:
+        - $ref: "#/components/parameters/VideoId"
+      responses:
+        "200":
+          description: video bytes
+          content:
+            video/mp4:
+              schema:
+                type: string
+                format: binary
+  /v1/files/{id}:
+    get:
+      tags: [videos]
+      summary: HMAC or bearer file download
+      security: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: exp
+          schema:
+            type: integer
+        - in: query
+          name: sig
+          schema:
+            type: string
+      responses:
+        "200":
+          description: bytes
+  /v1/chat/completions:
+    post:
+      tags: [chat]
+      summary: Image chat shim
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                model:
+                  type: string
+                  example: toy-image
+                messages:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      role:
+                        type: string
+                      content:
+                        type: string
+            example:
+              model: toy-image
+              messages:
+                - role: user
+                  content: a red cube
+      responses:
+        "200":
+          description: chat.completion with images[] and data[]
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: sk-
+      description: OpenAI-style API key
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Api-Key
+  parameters:
+    ModelId:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: string
+    VideoId:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: string
+  responses:
+    Unauthorized:
+      description: invalid api key
+    RateLimited:
+      description: RPM or GPU busy
+    APIError:
+      description: OpenAI-style error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            message:
+              type: string
+            type:
+              type: string
+            code:
+              type: string
+            param:
+              type: string
+              nullable: true
+    ImageRequest:
+      type: object
+      required: [prompt]
+      properties:
+        model:
+          type: string
+        prompt:
+          type: string
+        negative_prompt:
+          type: string
+        n:
+          type: integer
+          default: 1
+        size:
+          type: string
+          example: 1024x1024
+        width:
+          type: integer
+        height:
+          type: integer
+        seed:
+          type: integer
+        quality:
+          type: string
+        response_format:
+          type: string
+          enum: [b64_json, url]
+        input_image:
+          type: string
+          description: data:image/...;base64,...
+    ImageResponse:
+      type: object
+      properties:
+        created:
+          type: integer
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              b64_json:
+                type: string
+              url:
+                type: string
+              revised_prompt:
+                nullable: true
+    VideoRequest:
+      type: object
+      required: [prompt]
+      properties:
+        model:
+          type: string
+        prompt:
+          type: string
+        seconds:
+          description: duration, string or number
+          example: "6"
+        duration:
+          description: alias of seconds
+        seed:
+          type: integer
+        input_reference:
+          description: data URL object or omitted for T2V
+          type: object
+          properties:
+            image_url:
+              type: string
+    VideoJob:
+      type: object
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+          example: video
+        model:
+          type: string
+        status:
+          type: string
+          enum: [queued, in_progress, completed, failed, cancelled, expired]
+        progress:
+          type: integer
+        url:
+          type: string
+          description: HMAC file URL; required when status=completed
+        unsigned_urls:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: integer
+        completed_at:
+          type: integer
+          nullable: true
+        error:
+          nullable: true

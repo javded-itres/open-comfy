@@ -1,0 +1,16 @@
+services:
+  opencomfy:
+    image: ghcr.io/javded-itres/opencomfy:0.1.0
+    build: .
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - /etc/opencomfy:/etc/opencomfy:ro
+      - /var/lib/opencomfy:/var/lib/opencomfy
+    environment:
+      OPENCOMFY_CONFIG: /etc/opencomfy/config.yaml
+    healthcheck:
+      test: ["CMD", "/opencomfy", "-healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 3

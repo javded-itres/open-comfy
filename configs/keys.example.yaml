@@ -1,0 +1,7 @@
+keys:
+  - name: holix-agents
+    key: sk-live-change-me
+    models: ["*"]
+    rpm: 30
+    max_concurrent: 2
+    enabled: true

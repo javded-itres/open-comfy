@@ -1,0 +1,37 @@
+listen: ":8788"
+public_base_url: ""
+log_level: info
+http:
+  max_body_bytes: 33554432
+  max_wait_s: 120
+  allow_long_wait: false
+  chat_shim: true
+  read_header_timeout_s: 10
+  allow_remote_images: false
+comfyui:
+  base_url: "http://127.0.0.1:8188"
+  request_timeout_s: 60
+  poll_interval_s: 2
+  max_in_flight: 2
+  max_waiting: 32
+  exclusive: true
+  allow_interrupt: false
+  min_version: "0.3.7"
+files:
+  dir: /var/lib/opencomfy/files
+  ttl: 24h
+  max_bytes: 21474836480
+  hmac_secret_file: /var/lib/opencomfy/hmac.secret
+jobs:
+  dir: /var/lib/opencomfy/jobs
+  ttl: 48h
+  max_active: 256
+  store_prompt: false
+metrics:
+  enabled: true
+  auth: auto
+auth:
+  disabled: false
+  keys_file: /etc/opencomfy/keys.yaml
+models_file: /etc/opencomfy/models.yaml
+workflows_dir: /etc/opencomfy/workflows

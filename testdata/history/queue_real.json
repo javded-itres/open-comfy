@@ -1,0 +1,8 @@
+{
+  "queue_running": [
+    [0, "a1b2c3d4-e5f6-7890-abcd-ef1234567890", {"6": {}}, {"client_id": "x"}, ["9"]]
+  ],
+  "queue_pending": [
+    [1, "bbbbbbbb-e5f6-7890-abcd-ef1234567890", {}, {}, ["9"]]
+  ]
+}

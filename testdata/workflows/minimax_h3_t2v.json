@@ -1,0 +1,7 @@
+{
+  "positive": {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["clip", 0]}},
+  "clip": {"class_type": "CLIPLoader", "inputs": {"clip_name": "clip.safetensors"}},
+  "length": {"class_type": "PrimitiveInt", "inputs": {"value": 6}},
+  "load_image": {"class_type": "LoadImage", "inputs": {"image": ""}},
+  "save_video": {"class_type": "SaveVideo", "inputs": {"filename_prefix": "mm", "images": ["positive", 0]}}
+}

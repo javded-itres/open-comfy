@@ -1,0 +1,18 @@
+# holix-media client pointing at OpenComfy.
+# Images: b64 or HMAC url (GET without Authorization).
+# Videos: T2V default minimax-hailuo-02. Client poll is 180s — keep
+# model.timeout_s <= 180 or patch holix-media. I2V ltx2-i2v is not drop-in.
+
+enabled: true
+image_providers:
+  - id: opencomfy
+    type: openai_images
+    base_url: http://127.0.0.1:8788/v1
+    api_key_env: OPENCOMFY_API_KEY
+    model: flux-dev
+video_providers:
+  - id: opencomfy
+    type: openai_videos
+    base_url: http://127.0.0.1:8788/v1
+    api_key_env: OPENCOMFY_API_KEY
+    model: minimax-hailuo-02

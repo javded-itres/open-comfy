@@ -1,0 +1,16 @@
+{
+  "10": {
+    "class_type": "Resize",
+    "inputs": {
+      "resize_type": {"width": 1, "height": 2},
+      "image": ["9", 0]
+    }
+  },
+  "9": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "nested",
+      "images": ["10", 0]
+    }
+  }
+}

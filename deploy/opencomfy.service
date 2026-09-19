@@ -1,0 +1,23 @@
+[Unit]
+Description=OpenComfy OpenAI-compatible ComfyUI gateway
+After=network.target
+
+[Service]
+Type=simple
+User=opencomfy
+Group=opencomfy
+EnvironmentFile=-/etc/opencomfy/env
+ExecStart=/usr/local/bin/opencomfy -config /etc/opencomfy/config.yaml
+Restart=on-failure
+RestartPreventExitStatus=2
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/opencomfy
+ReadOnlyPaths=/etc/opencomfy
+UMask=0077
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
