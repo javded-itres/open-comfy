@@ -97,6 +97,9 @@ func mockComfy(t *testing.T) *httptest.Server {
 func testServer(t *testing.T, comfyURL string) (*Server, string) {
 	t.Helper()
 	dir := t.TempDir()
+	t.Cleanup(func() {
+		time.Sleep(50 * time.Millisecond)
+	})
 	secret := bytes.Repeat([]byte{7}, 32)
 	cfg := config.Defaults()
 	cfg.Listen = "127.0.0.1:0"

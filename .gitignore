@@ -12,3 +12,5 @@ hmac.secret
 keys.yaml
 !configs/*.example.yaml
 docs/DESIGN.md
+.deploy/
+deploy/deploy-to-server.sh
