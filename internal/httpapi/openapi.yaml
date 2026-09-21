@@ -5,9 +5,10 @@ info:
     OpenAI-compatible image/video API in front of ComfyUI.
 
     1. Click **Authorize** and paste `sk-...` (or use the `X-Api-Key` header).
-    2. `GET /v1/models` to see configured workflows.
-    3. `POST /v1/images/generations` is synchronous (may take minutes).
-    4. `POST /v1/videos` returns `{status: queued}`; poll `GET /v1/videos/{id}` until `completed` (includes `url`).
+    2. Import saved ComfyUI workflows at `/import` (multi-select). Blocked if prompt or required reference is missing.
+    3. `GET /v1/models` to see configured workflows.
+    4. `POST /v1/images/generations` is synchronous (may take minutes).
+    5. `POST /v1/videos` returns `{status: queued}`; poll `GET /v1/videos/{id}` until `completed` (includes `url`).
   version: 0.1.0
 servers:
   - url: /
@@ -18,6 +19,8 @@ tags:
   - name: images
   - name: videos
   - name: chat
+  - name: import
+  - name: mcp
 security:
   - bearerAuth: []
   - apiKeyAuth: []
@@ -48,13 +51,163 @@ paths:
       responses:
         "200":
           description: spec
+  /import:
+    get:
+      tags: [import]
+      summary: HTML UI to pick ComfyUI workflows
+      security: []
+      responses:
+        "200":
+          description: page
+  /v1/comfy/workflows:
+    get:
+      tags: [import]
+      summary: List ComfyUI userdata workflows with inferred mappings
+      responses:
+        "200":
+          description: each item has can_import, errors, params
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/comfy/analyze:
+    post:
+      tags: [import]
+      summary: Analyze a workflow JSON or a userdata name for missing nodes and models
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                workflow:
+                  type: object
+      responses:
+        "200":
+          description: missing_nodes, missing_models, reused_models, allowlisted_packs, ready
+  /v1/comfy/provision:
+    post:
+      tags: [import]
+      summary: Save JSON to ComfyUI userdata and optionally git-clone allowlisted custom nodes
+      description: |
+        Variant C. Custom nodes clone only if `comfyui.custom_nodes_dir` is set and the pack
+        is on the allowlist. Missing weights: search `comfyui.models_dir` by filename first
+        (symlink into the expected Comfy folder); with `install_models` download the rest
+        from Hugging Face. Does not reboot ComfyUI.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                overwrite:
+                  type: boolean
+                save:
+                  type: boolean
+                install_nodes:
+                  type: boolean
+                install_models:
+                  type: boolean
+                workflow:
+                  type: object
+      responses:
+        "200":
+          description: saved path, analysis, installed git dirs, needs_reboot, download_id
+  /v1/comfy/downloads/{id}:
+    get:
+      tags: [import]
+      summary: Weight download job (local reuse, then Hugging Face)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: status and per-file progress
+        "404":
+          description: unknown job
+  /v1/comfy/import:
+    post:
+      tags: [import]
+      summary: Import selected workflow filenames (multi)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [names]
+              properties:
+                names:
+                  type: array
+                  items:
+                    type: string
+                  example:
+                    - MiniMax H3 Talking Avatar.json
+                    - ND_Flux2_Klein_AIO_v1.json
+      responses:
+        "200":
+          description: imported / skipped / failed
+        "400":
+          description: none imported (prompt/reference missing or empty selection)
+  /v1/comfy/unload:
+    post:
+      tags: [import]
+      summary: Remove models from OpenComfy API (not ComfyUI library)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              properties:
+                ids:
+                  type: array
+                  items:
+                    type: string
+                  example: [nd-flux2-klein-aio-v1]
+      responses:
+        "200":
+          description: removed / failed
+  /mcp:
+    post:
+      tags: [mcp]
+      summary: MCP JSON-RPC (initialize, tools/list, tools/call)
+      description: |
+        Streamable HTTP. Same Bearer as the REST API.
+        tools/list exposes list_models, get_model, get_video, and one generate_<id> tool per catalog model
+        whose inputSchema required fields match the workflow (e.g. input_image as a data URL).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: JSON-RPC result
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    get:
+      tags: [mcp]
+      summary: MCP GET is not used (no SSE notifications)
+      responses:
+        "405":
+          description: method not allowed
   /v1/models:
     get:
       tags: [models]
       summary: List models
       responses:
         "200":
-          description: OpenAI-style list plus pricing extras
+          description: OpenAI-style list plus parameters, required_parameters, input_schema, mcp_tool
         "401":
           $ref: "#/components/responses/Unauthorized"
   /v1/models/{id}:
@@ -152,8 +305,11 @@ paths:
                 seconds:
                   type: string
                 input_reference:
-                  type: string
-                  format: binary
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                  description: one or more files; repeat the field
       responses:
         "200":
           description: queued job
@@ -331,7 +487,12 @@ components:
           enum: [b64_json, url]
         input_image:
           type: string
-          description: data:image/...;base64,...
+          description: data URL, or use input_images for several
+        input_images:
+          type: array
+          items:
+            type: string
+          description: extra reference images (data URLs), mapped in order to LoadImage nodes
     ImageResponse:
       type: object
       properties:
@@ -364,11 +525,12 @@ components:
         seed:
           type: integer
         input_reference:
-          description: data URL object or omitted for T2V
-          type: object
-          properties:
-            image_url:
-              type: string
+          description: "data URL, {image_url: data:...}, file, or an array of those"
+        input_images:
+          type: array
+          items:
+            type: string
+          description: additional data URLs; order matches maps_to LoadImage nodes
     VideoJob:
       type: object
       properties:

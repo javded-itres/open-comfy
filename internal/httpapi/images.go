@@ -147,6 +147,7 @@ func parseImageReq(raw map[string]any) (workflow.Request, error) {
 	req := workflow.Request{Extra: map[string]any{}}
 	req.Model, _ = raw["model"].(string)
 	req.Prompt, _ = raw["prompt"].(string)
+	req.Prompt = workflow.CleanChatPrompt(req.Prompt)
 	req.NegativePrompt, _ = raw["negative_prompt"].(string)
 	req.Size, _ = raw["size"].(string)
 	req.Quality, _ = raw["quality"].(string)
@@ -165,21 +166,22 @@ func parseImageReq(raw map[string]any) (workflow.Request, error) {
 	if v, ok := asInt64Ptr(raw["seed"]); ok {
 		req.Seed = v
 	}
-	if img, ok := raw["input_image"].(string); ok && img != "" {
-		if strings.HasPrefix(img, "http://") || strings.HasPrefix(img, "https://") {
-			return req, &workflow.Error{Code: "invalid_value", Param: "input_image", Message: "remote images disabled"}
+	if img, ok := raw["input_image"]; ok {
+		if err := applyInputReference(&req, img); err != nil {
+			return req, err
 		}
-		b, err := engine.DecodeDataURL(img)
-		if err != nil {
-			return req, &workflow.Error{Code: "invalid_value", Param: "input_image", Message: err.Error()}
+	}
+	if imgs, ok := raw["input_images"]; ok {
+		if err := applyInputReference(&req, imgs); err != nil {
+			return req, err
 		}
-		req.InputImage = b
-		req.HasInputImage = true
 	}
 	if ir, ok := raw["input_reference"]; ok {
-		if req.HasInputImage {
-			return req, &workflow.Error{Code: "invalid_value", Param: "input_reference", Message: "input_reference and input_image both set"}
+		if err := applyInputReference(&req, ir); err != nil {
+			return req, err
 		}
+	}
+	if ir, ok := raw["input_references"]; ok {
 		if err := applyInputReference(&req, ir); err != nil {
 			return req, err
 		}
@@ -198,15 +200,24 @@ func parseImageReq(raw map[string]any) (workflow.Request, error) {
 
 func applyInputReference(req *workflow.Request, ir any) error {
 	switch t := ir.(type) {
+	case []any:
+		for _, it := range t {
+			if err := applyInputReference(req, it); err != nil {
+				return err
+			}
+		}
+		return nil
 	case string:
 		if strings.HasPrefix(t, "data:") {
 			b, err := engine.DecodeDataURL(t)
 			if err != nil {
 				return &workflow.Error{Code: "invalid_value", Param: "input_reference", Message: err.Error()}
 			}
-			req.InputImage = b
-			req.HasInputImage = true
+			appendRef(req, b)
 			return nil
+		}
+		if strings.HasPrefix(t, "http://") || strings.HasPrefix(t, "https://") {
+			return &workflow.Error{Code: "invalid_value", Param: "input_reference", Message: "remote images disabled"}
 		}
 		return &workflow.Error{Code: "not_supported", Param: "input_reference", Message: "file_id is not supported in v1"}
 	case map[string]any:
@@ -214,16 +225,7 @@ func applyInputReference(req *workflow.Request, ir any) error {
 			return &workflow.Error{Code: "not_supported", Param: "input_reference", Message: "file_id is not supported in v1"}
 		}
 		if u, ok := t["image_url"].(string); ok {
-			if strings.HasPrefix(u, "http") {
-				return &workflow.Error{Code: "invalid_value", Param: "input_reference", Message: "remote images disabled"}
-			}
-			b, err := engine.DecodeDataURL(u)
-			if err != nil {
-				return &workflow.Error{Code: "invalid_value", Param: "input_reference", Message: err.Error()}
-			}
-			req.InputImage = b
-			req.HasInputImage = true
-			return nil
+			return applyInputReference(req, u)
 		}
 		if m, ok := t["image_url"].(map[string]any); ok {
 			if u, ok := m["url"].(string); ok {
@@ -232,6 +234,14 @@ func applyInputReference(req *workflow.Request, ir any) error {
 		}
 	}
 	return &workflow.Error{Code: "invalid_value", Param: "input_reference", Message: "invalid input_reference"}
+}
+
+func appendRef(req *workflow.Request, b []byte) {
+	req.InputImages = append(req.InputImages, b)
+	if len(req.InputImage) == 0 {
+		req.InputImage = b
+	}
+	req.HasInputImage = true
 }
 
 func asIntPtr(v any) (*int, bool) {

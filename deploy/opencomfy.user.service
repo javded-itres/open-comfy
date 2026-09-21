@@ -6,6 +6,7 @@ After=network.target
 Type=simple
 ExecStart=%h/.local/bin/opencomfy -config %h/.config/opencomfy/config.yaml
 Environment=OPENCOMFY_DATA=%h/.local/share/opencomfy
+EnvironmentFile=-%h/.config/opencomfy/hf.env
 Restart=on-failure
 RestartPreventExitStatus=2
 RestartSec=3

@@ -17,6 +17,7 @@ const swaggerHTML = `<!DOCTYPE html>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>OpenComfy API</title>
+  <!-- import UI: /import -->
   <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui.css"/>
   <style>
     html { color-scheme: light; }
@@ -27,6 +28,7 @@ const swaggerHTML = `<!DOCTYPE html>
   </style>
 </head>
 <body>
+  <p style="margin:12px 16px;font:14px system-ui"><a href="/import">Import ComfyUI workflows</a></p>
   <div id="swagger-ui"></div>
   <script src="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui-bundle.js"></script>
   <script>

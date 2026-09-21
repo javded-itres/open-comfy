@@ -8,6 +8,7 @@
 4. Bind ComfyUI to `127.0.0.1:8188`. Do not run image_bot against the same instance.
 5. Install `deploy/opencomfy.service`
 6. Missing config exits **2**; the unit has `RestartPreventExitStatus=2`
+7. Hugging Face downloads: put `HF_TOKEN=hf_…` in `~/.config/opencomfy/hf.env` (user unit) or `/etc/opencomfy/env` (system unit). `chmod 600`. Config key `comfyui.hf_token_env` defaults to `HF_TOKEN`. Do not commit the token.
 
 ## Docker
 

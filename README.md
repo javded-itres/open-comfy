@@ -13,7 +13,8 @@ This is **not** a Holix agent extension. Holix talks to OpenComfy as just anothe
 - `POST /v1/images/generations` — sync image (default `b64_json`, or HMAC `url`)
 - `POST /v1/videos` — async job (`200` + `queued`); poll `GET /v1/videos/{id}`; bytes at `/content`
 - Completed video JSON always includes an absolute HMAC `url` (holix-media never calls `/content`)
-- `GET /v1/models` — catalog, dummy USD prices, overridable parameters
+- `GET /v1/models` — catalog, dummy USD prices, overridable parameters (`parameters` / `required_parameters` / `input_schema`)
+- MCP at `POST /mcp` — one `generate_<id>` tool per workflow; required fields (e.g. `input_image`) appear in the tool schema
 - Swagger UI at `/docs` (`/openapi.json`)
 - Bearer `sk-…` or `X-Api-Key`, RPM, model allowlist
 - systemd or Docker (`network_mode: host`); ComfyUI stays on the host
@@ -22,7 +23,8 @@ This is **not** a Holix agent extension. Holix talks to OpenComfy as just anothe
 
 - A running **ComfyUI** (`127.0.0.1:8188` recommended). OpenComfy should be the **only** client of that instance (do not share with Telegram bots on the same port).
 - ComfyUI **≥ 0.3.7** (client `prompt_id` must be a UUID).
-- Workflows exported as **API format** JSON (not the UI `{nodes, links}` graph).
+- Workflows imported from ComfyUI userdata (UI graphs). Upload JSON on `/import` (`POST /v1/comfy/provision`): save to ComfyUI, analyze missing nodes/weights, git-clone **allowlisted** custom nodes only. Then the existing import into the OpenComfy catalog. See [docs/workflows.md](docs/workflows.md).
+- Code changes follow [RULES.md](RULES.md) (layers, constructor DI, SOLID). Product design: [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Quick start
 
@@ -149,6 +151,19 @@ MikroLLM has an **OpenComfy** backend kind. Add a server:
 - token: the OpenComfy `sk-…`
 
 Refresh catalogs, connect aliases on **Models**, then call MikroLLM `/v1/images/generations` and `/v1/videos` as usual.
+
+## Import workflows from ComfyUI
+
+Saved graphs in the ComfyUI UI (`user/default/workflows`) are **UI format**. OpenComfy needs **API format**. The importer lists `/userdata?dir=workflows`, converts via `/object_info`, infers `prompt` / `seed` / `width` / `height` / `seconds` / `input_image`, and appends models to `models.yaml`.
+
+Web UI (multi-select): [http://127.0.0.1:8788/import](http://127.0.0.1:8788/import) — paste the API key, tick workflows, import. Rows without a detected **prompt**, or without a **reference** when the graph has LoadImage/LoadVideo, are blocked.
+
+```bash
+opencomfy -config ~/.config/opencomfy/config.yaml -list-comfy
+opencomfy -config ~/.config/opencomfy/config.yaml -import-comfy "MiniMax H3 Talking Avatar.json" "ND_Flux2_Klein_AIO_v1.json"
+```
+
+Existing model ids are skipped. `models.yaml.bak` is written on change.
 
 ## Develop
 

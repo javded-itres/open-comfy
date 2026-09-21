@@ -18,19 +18,21 @@ import (
 	"github.com/javded-itres/open-comfy/internal/comfy"
 	"github.com/javded-itres/open-comfy/internal/config"
 	"github.com/javded-itres/open-comfy/internal/files"
+	"github.com/javded-itres/open-comfy/internal/importwf"
 	"github.com/javded-itres/open-comfy/internal/jobs"
 	"github.com/javded-itres/open-comfy/internal/queue"
 )
 
 type Server struct {
-	Cfg    *config.Config
-	Auth   *auth.Service
-	Cat    *catalog.Catalog
-	Comfy  *comfy.Client
-	Jobs   *jobs.Store
-	Files  *files.Store
-	Admit  *queue.Admission
-	Log    *log.Logger
+	Cfg   *config.Config
+	Auth  *auth.Service
+	Cat   *catalog.Catalog
+	Comfy *comfy.Client
+	Jobs  *jobs.Store
+	Files *files.Store
+	Admit *queue.Admission
+	Log   *log.Logger
+	DL    *importwf.Downloads
 
 	videoCh chan string
 	once    sync.Once
@@ -46,6 +48,7 @@ func New(cfg *config.Config, a *auth.Service, cat *catalog.Catalog, c *comfy.Cli
 		Files:   f,
 		Admit:   queue.New(cfg.ComfyUI.MaxInFlight, cfg.ComfyUI.MaxWaiting),
 		Log:     log.New(os.Stderr, "", log.LstdFlags),
+		DL:      importwf.NewDownloads(),
 		videoCh: make(chan string, 64),
 	}
 	return s
@@ -75,6 +78,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /swagger/index.html", s.swaggerUI)
 	mux.HandleFunc("GET /openapi.yaml", s.openapiYAMLHandler)
 	mux.HandleFunc("GET /openapi.json", s.openapiJSON)
+	mux.HandleFunc("GET /import", s.importPage)
 
 	s.protect(mux, "GET /v1/models", s.listModels)
 	s.protect(mux, "GET /models", s.listModels)
@@ -97,8 +101,20 @@ func (s *Server) Handler() http.Handler {
 	s.protect(mux, "DELETE /v1/videos/{id}", s.deleteVideo)
 	s.protect(mux, "DELETE /videos/{id}", s.deleteVideo)
 
+	s.protect(mux, "GET /v1/comfy/workflows", s.listComfyWorkflows)
+	s.protect(mux, "POST /v1/comfy/analyze", s.analyzeComfyWorkflow)
+	s.protect(mux, "POST /v1/comfy/provision", s.provisionComfyWorkflow)
+	s.protect(mux, "GET /v1/comfy/downloads/{id}", s.comfyDownloadStatus)
+	s.protect(mux, "POST /v1/comfy/import", s.importComfyWorkflows)
+	s.protect(mux, "POST /v1/comfy/unload", s.unloadComfyModels)
+	s.protect(mux, "DELETE /v1/models/{id}", s.deleteModel)
 	s.protect(mux, "POST /v1/chat/completions", s.chat)
 	s.protect(mux, "POST /chat/completions", s.chat)
+
+	s.protect(mux, "POST /mcp", s.mcpPOST)
+	s.protect(mux, "GET /mcp", s.mcpGET)
+	s.protect(mux, "DELETE /mcp", s.mcpDELETE)
+	mux.HandleFunc("OPTIONS /mcp", s.mcpOPTIONS)
 
 	mux.HandleFunc("GET /v1/files/{id}", s.getFile)
 	return mux

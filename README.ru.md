@@ -13,7 +13,8 @@ MIT. Go 1.23+, без CGO, один статический бинарь.
 - `POST /v1/images/generations` — синхронная картинка (`b64_json` или HMAC-`url`)
 - `POST /v1/videos` — асинхронный джоб (`200` + `queued`); опрос `GET /v1/videos/{id}`; байты на `/content`
 - У completed-видео в JSON всегда абсолютный HMAC-`url` (holix-media не вызывает `/content`)
-- `GET /v1/models` — каталог, фиктивные цены USD, какие параметры можно менять
+- `GET /v1/models` — каталог, фиктивные цены USD, параметры (`parameters` / `required_parameters` / `input_schema`)
+- MCP: `POST /mcp` — на каждый workflow свой tool `generate_<id>`; обязательные поля (например `input_image`) сразу в схеме
 - Swagger UI: `/docs` (`/openapi.json`)
 - Bearer `sk-…` или `X-Api-Key`, RPM, allowlist моделей
 - systemd или Docker (`network_mode: host`); ComfyUI остаётся на хосте
@@ -22,7 +23,7 @@ MIT. Go 1.23+, без CGO, один статический бинарь.
 
 - Запущенный **ComfyUI** (лучше `127.0.0.1:8188`). OpenComfy должен быть **единственным** клиентом этого инстанса (не делить порт с Telegram-ботами).
 - ComfyUI **≥ 0.3.7** (`prompt_id` — UUID).
-- Workflow в формате **API export** JSON (не UI-граф `{nodes, links}`).
+- Workflow из библиотеки ComfyUI. На `/import` можно залить JSON (`POST /v1/comfy/provision`): сохранение в ComfyUI, анализ missing-нод/весов, git clone **только allowlist**. Дальше обычный импорт в каталог OpenComfy. См. [docs/workflows.md](docs/workflows.md).
 
 ## Быстрый старт
 
@@ -149,6 +150,19 @@ Drop-in holix-media для видео: T2V-модель, джоб укладыв
 - token: ключ OpenComfy `sk-…`
 
 Обновите каталоги, подключите alias на вкладке **Модели**, дальше вызывайте MikroLLM `/v1/images/generations` и `/v1/videos` как обычно.
+
+## Импорт workflow из ComfyUI
+
+Графы из UI ComfyUI (`user/default/workflows`) — **UI-формат**. OpenComfy нужен **API-format**. Импортёр читает `/userdata?dir=workflows`, конвертирует через `/object_info`, угадывает `prompt` / `seed` / `width` / `height` / `seconds` / `input_image` и дописывает модели в `models.yaml`.
+
+Веб: [http://127.0.0.1:8788/import](http://127.0.0.1:8788/import) — ключ, галочки, загрузка нескольких. Без **prompt** или без **reference** (если в графе LoadImage/LoadVideo) строка заблокирована.
+
+```bash
+opencomfy -config ~/.config/opencomfy/config.yaml -list-comfy
+opencomfy -config ~/.config/opencomfy/config.yaml -import-comfy "MiniMax H3 Talking Avatar.json" "ND_Flux2_Klein_AIO_v1.json"
+```
+
+Существующие id пропускаются. При записи создаётся `models.yaml.bak`.
 
 ## Разработка
 

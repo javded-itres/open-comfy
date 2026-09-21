@@ -1,11 +1,17 @@
 package comfy
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+	"time"
 )
 
 func testdata(t *testing.T, elem ...string) string {
@@ -71,5 +77,43 @@ func TestPickArtifactSaveVideoMP4InImages(t *testing.T) {
 	}
 	if a.Filename != "MiniMax_H3_00018_.mp4" || a.Kind != "video" {
 		t.Fatalf("%+v", a)
+	}
+}
+
+func TestConvertWorkflowUsesComfyEndpoint(t *testing.T) {
+	var gotPath string
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"57:27":{"class_type":"CLIPTextEncode","inputs":{"text":"hello"}},"9":{"class_type":"SaveImage","inputs":{"images":["57:8",0]}}}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL, "", "cid", nil, 5*time.Second, 20*time.Millisecond, false)
+	g, err := c.ConvertWorkflow(context.Background(), []byte(`{"nodes":[],"links":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != "/workflow/convert" {
+		t.Fatalf("path %s", gotPath)
+	}
+	if !strings.Contains(string(gotBody), `"nodes"`) {
+		t.Fatalf("body %s", gotBody)
+	}
+	if g["57:27"].(map[string]any)["class_type"] != "CLIPTextEncode" {
+		t.Fatalf("%v", g)
+	}
+}
+
+func TestConvertWorkflowRejectsUUID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"57":{"class_type":"f2fdebf6-dfaf-43b6-9eb2-7f70613cfdc1","inputs":{}}}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL, "", "cid", nil, 5*time.Second, 20*time.Millisecond, false)
+	_, err := c.ConvertWorkflow(context.Background(), []byte(`{"nodes":[],"links":[]}`))
+	if err == nil || !strings.Contains(err.Error(), "unexpanded") {
+		t.Fatalf("err=%v", err)
 	}
 }

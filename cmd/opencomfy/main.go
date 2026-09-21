@@ -21,6 +21,7 @@ import (
 	"github.com/javded-itres/open-comfy/internal/files"
 	"github.com/javded-itres/open-comfy/internal/httpapi"
 	"github.com/javded-itres/open-comfy/internal/ids"
+	"github.com/javded-itres/open-comfy/internal/importwf"
 	"github.com/javded-itres/open-comfy/internal/jobs"
 )
 
@@ -32,6 +33,9 @@ func main() {
 	doInit := flag.Bool("init", false, "write example config, keys, hmac secret")
 	health := flag.Bool("healthcheck", false, "GET /health and exit 0/1")
 	skipWF := flag.Bool("skip-workflow-check", false, "skip workflow validation (CI)")
+	doImport := flag.Bool("import-comfy", false, "import selected ComfyUI workflow names (args)")
+	importDry := flag.Bool("import-comfy-dry", false, "preview selected names without writing")
+	listComfy := flag.Bool("list-comfy", false, "list ComfyUI userdata workflows and mapping errors")
 	showVer := flag.Bool("version", false, "print version")
 	flag.Parse()
 
@@ -48,6 +52,10 @@ func main() {
 		if key != "" {
 			fmt.Println("generated API key (shown once):", key)
 		}
+		return
+	}
+	if *listComfy || *doImport || *importDry {
+		runImport(*configPath, *listComfy, *importDry, flag.Args())
 		return
 	}
 	if *health {
@@ -152,5 +160,58 @@ func main() {
 	}()
 	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
+	}
+}
+
+func runImport(configPath string, listOnly, dry bool, names []string) {
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	client := comfy.New(
+		cfg.ComfyUI.BaseURL,
+		cfg.ComfyUI.AuthHeader,
+		ids.New("oc-"),
+		cfg.ComfyUI.ExtraData,
+		time.Duration(cfg.ComfyUI.RequestTimeoutS)*time.Second,
+		time.Duration(cfg.ComfyUI.PollIntervalS)*time.Second,
+		false,
+	)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	if listOnly || len(names) == 0 {
+		items, err := importwf.List(ctx, client, cfg.ModelsFile, cfg.WorkflowsDir)
+		if err != nil {
+			log.Fatal(err)
+		}
+		for _, it := range items {
+			flag := "OK"
+			if !it.CanImport {
+				flag = "BLOCK"
+			}
+			fmt.Printf("%s\t%s\t%s\t%v\n", flag, it.Name, it.Modality, it.Errors)
+		}
+		if !listOnly && len(names) == 0 {
+			fmt.Fprintln(os.Stderr, "select workflows: opencomfy -import-comfy -config … \"Name.json\" \"Other.json\"")
+			fmt.Fprintln(os.Stderr, "or open http://<host>:8788/import")
+			os.Exit(2)
+		}
+		return
+	}
+	res, err := importwf.ImportSelected(ctx, client, cfg.ModelsFile, cfg.WorkflowsDir, names, dry)
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, s := range res.Imported {
+		fmt.Println("imported:", s)
+	}
+	for _, s := range res.Skipped {
+		fmt.Println("skipped:", s)
+	}
+	for _, s := range res.Failed {
+		fmt.Println("failed:", s)
+	}
+	if len(res.Failed) > 0 && len(res.Imported) == 0 {
+		os.Exit(1)
 	}
 }

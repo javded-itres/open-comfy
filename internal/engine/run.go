@@ -14,9 +14,9 @@ import (
 )
 
 type Result struct {
-	Bytes []byte
-	MIME  string
-	Width int
+	Bytes  []byte
+	MIME   string
+	Width  int
 	Height int
 }
 
@@ -41,12 +41,24 @@ func Run(ctx context.Context, client *comfy.Client, cat *catalog.Catalog, m *cat
 	if err != nil {
 		return Result{}, comfy.PromptResult{}, err
 	}
-	if req.HasInputImage && len(req.InputImage) > 0 && req.InputName == "" {
-		up, err := client.UploadImage(ctx, "input.png", req.InputImage)
-		if err != nil {
-			return Result{}, comfy.PromptResult{}, fmt.Errorf("upload: %w", err)
+	if n := catalog.FirstUUIDClass(graph); n != "" {
+		return Result{}, comfy.PromptResult{}, fmt.Errorf("unexpanded subgraph node %s (UUID class_type); re-import the UI workflow from ComfyUI", n)
+	}
+	blobs := req.ImageBlobs()
+	if len(blobs) > 0 && len(req.ImageFiles()) == 0 {
+		var names []string
+		for i, b := range blobs {
+			up, err := client.UploadImage(ctx, fmt.Sprintf("input_%d.png", i), b)
+			if err != nil {
+				return Result{}, comfy.PromptResult{}, fmt.Errorf("upload: %w", err)
+			}
+			names = append(names, comfy.ComfyImageName(up))
 		}
-		req.InputName = comfy.ComfyImageName(up)
+		req.InputNames = names
+		if len(names) == 1 {
+			req.InputName = names[0]
+		}
+		req.HasInputImage = true
 	}
 	values, err := workflow.BuildValues(cat, m, req)
 	if err != nil {
@@ -59,6 +71,7 @@ func Run(ctx context.Context, client *comfy.Client, cat *catalog.Catalog, m *cat
 	if err != nil {
 		return Result{}, comfy.PromptResult{}, err
 	}
+	injected, pickNode := catalog.EnsureSaver(injected, m.Modality, m.OutputNode)
 	if !ids.IsUUID(promptID) {
 		promptID = ids.UUID()
 	}
@@ -108,7 +121,7 @@ func Run(ctx context.Context, client *comfy.Client, cat *catalog.Catalog, m *cat
 					done = true
 				}
 			}
-			art, err := comfy.PickArtifact(h, m.OutputNode, m.Modality, m.OutputMIME)
+			art, err := comfy.PickArtifact(h, pickNode, m.Modality, m.OutputMIME)
 			if err != nil {
 				if !done {
 					continue

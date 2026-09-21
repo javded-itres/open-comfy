@@ -39,6 +39,7 @@ type Job struct {
 	CompletedAt       *int64         `json:"completed_at"`
 	ExpiresAt         int64          `json:"expires_at"`
 	InputPath         string         `json:"input_path,omitempty"`
+	InputPaths        []string       `json:"input_paths,omitempty"`
 }
 
 type JobError struct {

@@ -33,8 +33,30 @@ type Request struct {
 	AspectRatio    string
 	Extra          map[string]any
 	InputImage     []byte
+	InputImages    [][]byte
 	InputName      string // already a comfy filename
+	InputNames     []string
 	HasInputImage  bool
+}
+
+func (r Request) ImageBlobs() [][]byte {
+	if len(r.InputImages) > 0 {
+		return r.InputImages
+	}
+	if len(r.InputImage) > 0 {
+		return [][]byte{r.InputImage}
+	}
+	return nil
+}
+
+func (r Request) ImageFiles() []string {
+	if len(r.InputNames) > 0 {
+		return r.InputNames
+	}
+	if r.InputName != "" {
+		return []string{r.InputName}
+	}
+	return nil
 }
 
 func DeepCopy(graph map[string]any) (map[string]any, error) {
@@ -94,17 +116,22 @@ func BuildValues(cat *catalog.Catalog, m *catalog.Model, req Request) (map[strin
 			values["seconds"] = v
 			continue
 		}
-		if k == "input_reference" || k == "input_image" {
+		if k == "input_reference" || k == "input_references" || k == "input_image" || k == "input_images" {
+			continue
+		}
+		if k == "prompt" || k == "negative_prompt" {
 			continue
 		}
 		values[k] = v
 	}
-	if req.HasInputImage || req.InputName != "" {
-		if req.InputName != "" {
-			values["input_image"] = req.InputName
-		} else {
-			values["input_image"] = req.InputImage // placeholder; engine replaces after upload
-		}
+	if names := req.ImageFiles(); len(names) == 1 {
+		values["input_image"] = names[0]
+		req.HasInputImage = true
+	} else if len(names) > 1 {
+		values["input_image"] = names
+		req.HasInputImage = true
+	} else if req.HasInputImage {
+		values["input_image"] = req.InputImage
 	}
 
 	if err := applySize(cat, m, req, values); err != nil {
@@ -120,7 +147,7 @@ func BuildValues(cat *catalog.Catalog, m *catalog.Model, req Request) (map[strin
 		if p.Required {
 			pv := values[p.Name]
 			if pv == nil || pv == "" {
-				if p.Type == "image" && !req.HasInputImage && req.InputName == "" {
+				if p.Type == "image" && !req.HasInputImage && req.InputName == "" && len(req.InputNames) == 0 && len(req.InputImages) == 0 {
 					return nil, missingErr(p.Name)
 				}
 				if p.Type != "image" {
@@ -157,6 +184,12 @@ func BuildValues(cat *catalog.Catalog, m *catalog.Model, req Request) (map[strin
 		values["seed"] = normalizeSeed(v)
 	} else if m.Param("seed") != nil {
 		values["seed"] = randomSeed()
+	}
+	if s, ok := values["prompt"].(string); ok {
+		values["prompt"] = CleanChatPrompt(s)
+	}
+	if s, ok := values["negative_prompt"].(string); ok {
+		values["negative_prompt"] = CleanChatPrompt(s)
 	}
 	return values, nil
 }
@@ -270,7 +303,8 @@ func Inject(graph map[string]any, m *catalog.Model, values map[string]any) (map[
 		if p.Type == "image" && (v == nil || v == "") {
 			continue
 		}
-		for _, mt := range p.MapsTo {
+		vals := expandImageValues(v)
+		for i, mt := range p.MapsTo {
 			node, ok := g[mt.Node].(map[string]any)
 			if !ok {
 				return nil, fmt.Errorf("node %s missing", mt.Node)
@@ -279,12 +313,35 @@ func Inject(graph map[string]any, m *catalog.Model, values map[string]any) (map[
 			if !ok {
 				return nil, fmt.Errorf("node %s inputs not map", mt.Node)
 			}
-			if err := writePath(inputs, mt.Field, mt.Path, v); err != nil {
+			one := v
+			if len(vals) > 0 {
+				if i < len(vals) {
+					one = vals[i]
+				} else {
+					one = vals[len(vals)-1]
+				}
+			}
+			if err := writePath(inputs, mt.Field, mt.Path, one); err != nil {
 				return nil, err
 			}
 		}
 	}
 	return g, nil
+}
+
+func expandImageValues(v any) []any {
+	switch t := v.(type) {
+	case []string:
+		out := make([]any, len(t))
+		for i, s := range t {
+			out[i] = s
+		}
+		return out
+	case []any:
+		return t
+	default:
+		return nil
+	}
 }
 
 func writePath(inputs map[string]any, field string, path []string, val any) error {
@@ -427,7 +484,11 @@ type Error struct {
 func (e *Error) Error() string { return e.Message }
 
 func missingErr(param string) error {
-	return &Error{Code: "invalid_prompt", Param: param, Message: "missing required parameter " + param}
+	msg := "missing required parameter " + param
+	if param == "input_image" || param == "input_video" {
+		msg += "; send a data URL in input_image, input_images, input_reference, or input_references"
+	}
+	return &Error{Code: "invalid_prompt", Param: param, Message: msg}
 }
 func invalidErr(param, msg string) error {
 	return &Error{Code: "invalid_value", Param: param, Message: msg}
@@ -459,14 +520,40 @@ func SizeString(values map[string]any) string {
 	return fmt.Sprintf("%dx%d", w, h)
 }
 
+// CleanChatPrompt drops MikroLLM/LiteLLM playground wrappers so T2I models
+// (Z-Image etc.) do not render "Original image task…", assistant errors, or
+// JSON settings as text in the picture.
+func CleanChatPrompt(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return s
+	}
+	if !strings.Contains(s, "Original image task") && !strings.Contains(s, "\nUser: ") && !strings.Contains(s, "\nAssistant:") {
+		return s
+	}
+	var last string
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "User: "):
+			last = strings.TrimPrefix(line, "User: ")
+		case strings.HasPrefix(line, "Assistant:"):
+			continue
+		}
+	}
+	if last != "" {
+		return last
+	}
+	return s
+}
+
 func IgnoreOpenAI(k string) bool {
 	switch k {
 	case "style", "moderation", "user", "background", "partial_images",
-		"output_compression", "stream", "model", "prompt", "n", "size",
-		"quality", "response_format", "output_format", "extra_body", "extra",
-		"duration", "input_reference", "input_image", "width", "height",
-		"seed", "negative_prompt", "steps", "cfg_scale", "seconds", "fps",
-		"resolution", "aspect_ratio", "wait", "modalities", "messages":
+		"output_compression", "stream", "model", "n", "response_format",
+		"output_format", "extra_body", "extra", "wait", "modalities", "messages",
+		"prompt", "negative_prompt",
+		"input_reference", "input_references", "input_image", "input_images":
 		return true
 	}
 	return strings.HasPrefix(k, "_")

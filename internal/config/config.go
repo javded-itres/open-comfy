@@ -14,20 +14,20 @@ import (
 const ExitMissingConfig = 2
 
 type Config struct {
-	Listen        string            `yaml:"listen"`
-	PublicBaseURL string            `yaml:"public_base_url"`
-	LogLevel      string            `yaml:"log_level"`
-	HTTP          HTTP              `yaml:"http"`
-	ComfyUI       ComfyUI           `yaml:"comfyui"`
-	Files         Files             `yaml:"files"`
-	Jobs          Jobs              `yaml:"jobs"`
-	Metrics       Metrics           `yaml:"metrics"`
-	Auth          Auth              `yaml:"auth"`
-	ModelsFile    string            `yaml:"models_file"`
-	WorkflowsDir  string            `yaml:"workflows_dir"`
-	SkipWorkflow  bool              `yaml:"-"`
-	Version       string            `yaml:"-"`
-	BoundPort     int               `yaml:"-"`
+	Listen        string  `yaml:"listen"`
+	PublicBaseURL string  `yaml:"public_base_url"`
+	LogLevel      string  `yaml:"log_level"`
+	HTTP          HTTP    `yaml:"http"`
+	ComfyUI       ComfyUI `yaml:"comfyui"`
+	Files         Files   `yaml:"files"`
+	Jobs          Jobs    `yaml:"jobs"`
+	Metrics       Metrics `yaml:"metrics"`
+	Auth          Auth    `yaml:"auth"`
+	ModelsFile    string  `yaml:"models_file"`
+	WorkflowsDir  string  `yaml:"workflows_dir"`
+	SkipWorkflow  bool    `yaml:"-"`
+	Version       string  `yaml:"-"`
+	BoundPort     int     `yaml:"-"`
 }
 
 type HTTP struct {
@@ -40,17 +40,23 @@ type HTTP struct {
 }
 
 type ComfyUI struct {
-	BaseURL          string         `yaml:"base_url"`
-	AuthHeader       string         `yaml:"auth_header"`
-	ExtraData        map[string]any `yaml:"extra_data"`
-	APIKeyEnv        string         `yaml:"api_key_env"`
-	RequestTimeoutS  int            `yaml:"request_timeout_s"`
-	PollIntervalS    int            `yaml:"poll_interval_s"`
-	MaxInFlight      int            `yaml:"max_in_flight"`
-	MaxWaiting       int            `yaml:"max_waiting"`
-	Exclusive        bool           `yaml:"exclusive"`
-	AllowInterrupt   bool           `yaml:"allow_interrupt"`
-	MinVersion       string         `yaml:"min_version"`
+	BaseURL         string            `yaml:"base_url"`
+	AuthHeader      string            `yaml:"auth_header"`
+	ExtraData       map[string]any    `yaml:"extra_data"`
+	APIKeyEnv       string            `yaml:"api_key_env"`
+	RequestTimeoutS int               `yaml:"request_timeout_s"`
+	PollIntervalS   int               `yaml:"poll_interval_s"`
+	MaxInFlight     int               `yaml:"max_in_flight"`
+	MaxWaiting      int               `yaml:"max_waiting"`
+	Exclusive       bool              `yaml:"exclusive"`
+	AllowInterrupt  bool              `yaml:"allow_interrupt"`
+	MinVersion      string            `yaml:"min_version"`
+	CustomNodesDir  string            `yaml:"custom_nodes_dir"`
+	NodeAllowlist   []string          `yaml:"node_allowlist"`
+	ModelsDir       string            `yaml:"models_dir"`
+	HFTokenEnv      string            `yaml:"hf_token_env"`
+	HFAllowlist     []string          `yaml:"hf_allowlist"`
+	ModelMap        map[string]string `yaml:"model_map"`
 }
 
 type Files struct {

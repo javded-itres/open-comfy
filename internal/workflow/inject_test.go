@@ -8,6 +8,36 @@ import (
 	"github.com/javded-itres/open-comfy/internal/catalog"
 )
 
+func TestCleanChatPrompt(t *testing.T) {
+	plain := "гнилое яблоко"
+	if CleanChatPrompt(plain) != plain {
+		t.Fatal("plain")
+	}
+	folded := "Original image task and subsequent revisions. Produce one image matching the latest state.\n\nUser: Сгенерируй яблоко\nAssistant: prompt 400: {\"error\":{\"type\":\"value_not_in_list\"}}\nUser: гнилое яблоко"
+	if got := CleanChatPrompt(folded); got != "гнилое яблоко" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestBuildValuesDropsFoldedChatPrompt(t *testing.T) {
+	cat := loadCat(t)
+	m, err := cat.Resolve("toy-image", "image")
+	if err != nil {
+		t.Fatal(err)
+	}
+	folded := "Original image task and subsequent revisions. Produce one image matching the latest state.\n\nUser: Одна девушка в полный рост"
+	vals, err := BuildValues(cat, m, Request{
+		Prompt: CleanChatPrompt(folded),
+		Extra:  map[string]any{"prompt": folded},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vals["prompt"] != "Одна девушка в полный рост" {
+		t.Fatalf("prompt=%v", vals["prompt"])
+	}
+}
+
 func testdata() string {
 	_, file, _, _ := runtime.Caller(0)
 	return filepath.Join(filepath.Dir(file), "..", "..", "testdata")
@@ -98,6 +128,29 @@ func TestInjectLTX2(t *testing.T) {
 	img := out["5180"].(map[string]any)["inputs"].(map[string]any)["image"]
 	if img != "x.png" {
 		t.Fatalf("image=%v", img)
+	}
+}
+
+func TestInjectMultipleImages(t *testing.T) {
+	g := map[string]any{
+		"1": map[string]any{"class_type": "LoadImage", "inputs": map[string]any{"image": ""}},
+		"2": map[string]any{"class_type": "LoadImage", "inputs": map[string]any{"image": ""}},
+	}
+	m := &catalog.Model{Parameters: []catalog.Param{{
+		Name: "input_image", Type: "image",
+		MapsTo: []catalog.MapTo{
+			{Node: "1", Field: "image"},
+			{Node: "2", Field: "image"},
+		},
+	}}}
+	out, err := Inject(g, m, map[string]any{"input_image": []string{"a.png", "b.png"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := out["1"].(map[string]any)["inputs"].(map[string]any)["image"]
+	b := out["2"].(map[string]any)["inputs"].(map[string]any)["image"]
+	if a != "a.png" || b != "b.png" {
+		t.Fatalf("%v %v", a, b)
 	}
 }
 

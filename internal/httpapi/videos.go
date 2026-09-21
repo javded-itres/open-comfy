@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -31,6 +32,10 @@ func (s *Server) createVideo(w http.ResponseWriter, r *http.Request) {
 	if !s.allowModel(w, p, m) {
 		return
 	}
+	if _, err := workflow.BuildValues(s.Cat, m, req); err != nil {
+		mapErr(w, err)
+		return
+	}
 	if s.Jobs.CountActive() >= s.Cfg.Jobs.MaxActive {
 		w.Header().Set("Retry-After", "30")
 		writeError(w, 429, "rate_limit_error", "rate_limit_exceeded", "too many active video jobs", "")
@@ -51,11 +56,16 @@ func (s *Server) createVideo(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: now.Unix(),
 		ExpiresAt: now.Add(s.Cfg.JobTTL()).Unix(),
 	}
-	if req.HasInputImage && len(req.InputImage) > 0 {
-		ip := filepath.Join(s.Cfg.Jobs.Dir, id+".input")
-		if err := os.MkdirAll(s.Cfg.Jobs.Dir, 0o700); err == nil {
-			if err := os.WriteFile(ip, req.InputImage, 0o600); err == nil {
-				j.InputPath = ip
+	blobs := req.ImageBlobs()
+	if len(blobs) > 0 {
+		_ = os.MkdirAll(s.Cfg.Jobs.Dir, 0o700)
+		for i, b := range blobs {
+			ip := filepath.Join(s.Cfg.Jobs.Dir, fmt.Sprintf("%s.input.%d", id, i))
+			if err := os.WriteFile(ip, b, 0o600); err == nil {
+				j.InputPaths = append(j.InputPaths, ip)
+				if j.InputPath == "" {
+					j.InputPath = ip
+				}
 			}
 		}
 	}
@@ -101,7 +111,7 @@ func (s *Server) parseVideoReq(r *http.Request) (workflow.Request, bool, error) 
 			return req, wait, err
 		}
 		req.Model = r.FormValue("model")
-		req.Prompt = r.FormValue("prompt")
+		req.Prompt = workflow.CleanChatPrompt(r.FormValue("prompt"))
 		if v := r.FormValue("seconds"); v != "" {
 			req.Seconds = v
 		}
@@ -109,11 +119,24 @@ func (s *Server) parseVideoReq(r *http.Request) (workflow.Request, bool, error) 
 			req.Duration = v
 		}
 		req.Size = r.FormValue("size")
-		if f, _, err := r.FormFile("input_reference"); err == nil {
-			defer f.Close()
-			b, _ := io.ReadAll(f)
-			req.InputImage = b
-			req.HasInputImage = true
+		if r.MultipartForm != nil {
+			for _, key := range []string{"input_reference", "input_image", "input_images"} {
+				for _, fh := range r.MultipartForm.File[key] {
+					f, err := fh.Open()
+					if err != nil {
+						continue
+					}
+					b, _ := io.ReadAll(f)
+					f.Close()
+					if len(b) > 0 {
+						req.InputImages = append(req.InputImages, b)
+						if len(req.InputImage) == 0 {
+							req.InputImage = b
+						}
+						req.HasInputImage = true
+					}
+				}
+			}
 		}
 		return req, wait, nil
 	}
@@ -130,6 +153,7 @@ func (s *Server) parseVideoReq(r *http.Request) (workflow.Request, bool, error) 
 	}
 	req.Model, _ = raw["model"].(string)
 	req.Prompt, _ = raw["prompt"].(string)
+	req.Prompt = workflow.CleanChatPrompt(req.Prompt)
 	req.NegativePrompt, _ = raw["negative_prompt"].(string)
 	req.Size, _ = raw["size"].(string)
 	req.Quality, _ = raw["quality"].(string)
@@ -146,10 +170,17 @@ func (s *Server) parseVideoReq(r *http.Request) (workflow.Request, bool, error) 
 			return req, wait, err
 		}
 	}
-	if ir, ok := raw["input_reference"]; ok {
-		if req.HasInputImage {
-			return req, wait, &workflow.Error{Code: "invalid_value", Param: "input_reference", Message: "input_reference and input_image both set"}
+	if imgs, ok := raw["input_images"]; ok {
+		if err := applyInputReference(&req, imgs); err != nil {
+			return req, wait, err
 		}
+	}
+	if ir, ok := raw["input_reference"]; ok {
+		if err := applyInputReference(&req, ir); err != nil {
+			return req, wait, err
+		}
+	}
+	if ir, ok := raw["input_references"]; ok {
 		if err := applyInputReference(&req, ir); err != nil {
 			return req, wait, err
 		}
@@ -307,9 +338,13 @@ func (s *Server) runVideo(ctx context.Context, id string) {
 	if sec, ok := j.Params["seconds"]; ok {
 		req.Seconds = sec
 	}
-	if j.InputPath != "" {
-		if b, err := os.ReadFile(j.InputPath); err == nil {
-			req.InputImage = b
+	paths := j.InputPaths
+	if len(paths) == 0 && j.InputPath != "" {
+		paths = []string{j.InputPath}
+	}
+	for _, ip := range paths {
+		if b, err := os.ReadFile(ip); err == nil && len(b) > 0 {
+			req.InputImages = append(req.InputImages, b)
 			req.HasInputImage = true
 		}
 	}

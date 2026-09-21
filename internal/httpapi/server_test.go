@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/javded-itres/open-comfy/internal/comfy"
 	"github.com/javded-itres/open-comfy/internal/config"
 	"github.com/javded-itres/open-comfy/internal/files"
+	"github.com/javded-itres/open-comfy/internal/importwf"
 	"github.com/javded-itres/open-comfy/internal/jobs"
 )
 
@@ -40,8 +42,32 @@ func testdata() string {
 
 func mockComfy(t *testing.T) *httptest.Server {
 	t.Helper()
+	var mu sync.Mutex
+	files := map[string][]byte{}
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.URL.Path == "/object_info":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"SaveImage":{"name":"SaveImage","output_node":true,"input":{"required":{}}},"CLIPLoader":{"name":"CLIPLoader","input":{"required":{"clip_name":[["qwen/qwen_3_4b.safetensors"]]}}}}`))
+		case r.URL.Path == "/userdata" && r.Method == http.MethodGet:
+			w.Write([]byte(`[]`))
+		case strings.HasPrefix(r.URL.Path, "/userdata/"):
+			key := strings.TrimPrefix(r.URL.Path, "/userdata/")
+			mu.Lock()
+			defer mu.Unlock()
+			if r.Method == http.MethodPost {
+				b, _ := io.ReadAll(r.Body)
+				files[key] = b
+				w.Header().Set("Content-Type", "application/json")
+				w.Write([]byte(`"` + key + `"`))
+				return
+			}
+			if b, ok := files[key]; ok {
+				w.Header().Set("Content-Type", "application/json")
+				w.Write(b)
+				return
+			}
+			http.NotFound(w, r)
 		case r.URL.Path == "/system_stats":
 			w.Write([]byte(`{}`))
 		case r.URL.Path == "/prompt" && r.Method == http.MethodPost:
@@ -282,6 +308,32 @@ func TestChatShim(t *testing.T) {
 	rr := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rr, req)
 	if rr.Code != 200 {
+		t.Fatal(rr.Body.String())
+	}
+}
+
+func TestAnalyzeAndProvision(t *testing.T) {
+	importwf.UseEmptyNodeMap()
+	cu := mockComfy(t)
+	defer cu.Close()
+	s, key := testServer(t, cu.URL)
+	h := s.Handler()
+	body := `{"name":"demo.json","workflow":{"nodes":[{"id":1,"type":"TotallyFakeNode"},{"id":9,"type":"SaveImage"}],"links":[]}}`
+	req := httptest.NewRequest("POST", "/v1/comfy/analyze", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+key)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != 200 {
+		t.Fatal(rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "TotallyFakeNode") {
+		t.Fatal(rr.Body.String())
+	}
+	req = httptest.NewRequest("POST", "/v1/comfy/provision", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+key)
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != 200 || !strings.Contains(rr.Body.String(), `"saved":true`) {
 		t.Fatal(rr.Body.String())
 	}
 }

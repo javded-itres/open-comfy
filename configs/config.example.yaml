@@ -17,6 +17,12 @@ comfyui:
   exclusive: true
   allow_interrupt: false
   min_version: "0.3.7"
+  custom_nodes_dir: ""
+  node_allowlist: []
+  models_dir: ""
+  hf_token_env: HF_TOKEN  # read from env; user unit loads ~/.config/opencomfy/hf.env
+  hf_allowlist: []
+  model_map: {}
 files:
   dir: /var/lib/opencomfy/files
   ttl: 24h

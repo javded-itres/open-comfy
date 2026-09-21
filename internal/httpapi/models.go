@@ -76,6 +76,10 @@ func modelOpenAI(m *catalog.Model) map[string]any {
 			"image": img, "image_output": img,
 		},
 		"supported_parameters": m.SupportedNames(),
+		"parameters":           m.PublicParams(),
+		"required_parameters":  m.RequiredNames(),
+		"input_schema":         m.InputSchema(),
+		"mcp_tool":             m.ToolName(),
 	}
 }
 
@@ -119,10 +123,10 @@ func videoModelOR(m *catalog.Model) map[string]any {
 		sku = strconv.FormatFloat(m.Pricing.PerSecond, 'f', -1, 64)
 	}
 	return map[string]any{
-		"id":                            m.ID,
-		"name":                          m.Name,
-		"supported_durations":           durs,
+		"id":                             m.ID,
+		"name":                           m.Name,
+		"supported_durations":            durs,
 		"allowed_passthrough_parameters": passthru,
-		"pricing_skus":                  map[string]any{"per-video-second": sku},
+		"pricing_skus":                   map[string]any{"per-video-second": sku},
 	}
 }
