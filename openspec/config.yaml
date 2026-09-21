@@ -1,0 +1,18 @@
+schema: holix-spec
+context: |
+  Holix Spec-Driven Development workspace.
+rules:
+  proposal: |
+    Keep under 500 words; cover Why / What / Impact.
+  specs: |
+    Scenario-first requirements; no implementation detail.
+  tasks: |
+    Small checkboxes only (XS/S preferred); group by phase;
+    every task MUST have assignee: main | <subagent-type>;
+    every task SHOULD have size: xs|s|m (l/xl forbidden for subagents — split first);
+    one subagent task = one deliverable (one endpoint OR one screen OR one test file);
+    prefer 5–15 small tasks over 1–3 large ones so jobs use fewer steps;
+    wire depends_on for order; prefer subagents for independent workstreams.
+apply:
+  ask_execution_mode: true
+  default_mode: ask
