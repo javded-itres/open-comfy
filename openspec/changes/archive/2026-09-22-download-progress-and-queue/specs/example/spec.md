@@ -1,12 +1,6 @@
-# Example Domain
+# Delta: download-progress-and-queue
 
-### Requirement: System has a documented source of truth
-The project SHALL keep durable requirements under `openspec/specs/`.
-
-#### Scenario: New feature work
-- **GIVEN** a non-trivial feature request
-- **WHEN** work begins
-- **THEN** a change proposal is created before implementation
+## ADDED Requirements
 
 ### Requirement: download chunk progress
 The system SHALL report download progress incrementally: `DLItem.Bytes` MUST be updated on each read chunk, not only after completion.
@@ -36,6 +30,8 @@ The system SHALL limit the number of concurrent downloads via a bounded worker p
 - **GIVEN** `provision.max_concurrent == N` (default 2)
 - **WHEN** many models need downloading
 - **THEN** no more than N downloads run simultaneously
+
+## MODIFIED Requirements
 
 ### Requirement: download status API
 The `GET /comfy/downloads/{id}` endpoint MUST continue to return `items[].bytes`, `items[].total`, and `status` (backward-compatible), and MAY include a computed percentage when `total > 0`.

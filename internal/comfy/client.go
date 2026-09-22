@@ -123,6 +123,26 @@ func (c *Client) Queue(ctx context.Context) (Queue, error) {
 	return q, nil
 }
 
+// Status is a lightweight snapshot of the ComfyUI queue driven by /queue.
+// ComfyUI exposes no dedicated /status endpoint, so in-flight jobs come from
+// queue_running and waiting jobs from queue_pending.
+func (c *Client) Status(ctx context.Context) (Status, error) {
+	q, err := c.Queue(ctx)
+	if err != nil {
+		return Status{}, err
+	}
+	return Status{
+		InFlight: len(q.Running),
+		Waiting:  len(q.Pending),
+	}, nil
+}
+
+// Status is a count of ComfyUI queue activity.
+type Status struct {
+	InFlight int `json:"in_flight"`
+	Waiting  int `json:"waiting"`
+}
+
 func ExtractPromptID(item any) string {
 	switch t := item.(type) {
 	case string:

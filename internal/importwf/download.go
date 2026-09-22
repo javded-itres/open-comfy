@@ -2,16 +2,41 @@ package importwf
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/javded-itres/open-comfy/internal/ids"
 )
+
+// progressReader counts bytes read from an upstream reader and reports the
+// cumulative total through onChunk on every Read. It is always used by pointer,
+// never copied, so its internal mutex is not moved.
+type progressReader struct {
+	r       io.Reader
+	mu      sync.Mutex
+	cum     int64
+	onChunk func(cum int64)
+}
+
+func (pr *progressReader) Read(b []byte) (int, error) {
+	n, err := pr.r.Read(b)
+	pr.mu.Lock()
+	pr.cum += int64(n)
+	fn := pr.onChunk
+	pr.mu.Unlock()
+	if fn != nil {
+		fn(pr.cum)
+	}
+	return n, err
+}
 
 type DLStatus string
 
@@ -23,17 +48,18 @@ const (
 )
 
 type DLItem struct {
-	Value  string   `json:"value"`
-	Field  string   `json:"field"`
-	Class  string   `json:"class_type"`
-	Repo   string   `json:"repo,omitempty"`
-	File   string   `json:"file,omitempty"`
-	Dest   string   `json:"dest,omitempty"`
-	Local  string   `json:"local,omitempty"`
-	Status DLStatus `json:"status"`
-	Error  string   `json:"error,omitempty"`
-	Bytes  int64    `json:"bytes"`
-	Total  int64    `json:"total,omitempty"`
+	Value     string   `json:"value"`
+	Field     string   `json:"field"`
+	Class     string   `json:"class_type"`
+	ModelType string   `json:"model_type,omitempty"`
+	Repo      string   `json:"repo,omitempty"`
+	File      string   `json:"file,omitempty"`
+	Dest      string   `json:"dest,omitempty"`
+	Local     string   `json:"local,omitempty"`
+	Status    DLStatus `json:"status"`
+	Error     string   `json:"error,omitempty"`
+	Bytes     int64    `json:"bytes"`
+	Total     int64    `json:"total,omitempty"`
 }
 
 type DLJob struct {
@@ -52,12 +78,115 @@ type DLJobView struct {
 }
 
 type Downloads struct {
-	mu   sync.Mutex
-	jobs map[string]*DLJob
+	mu             sync.Mutex
+	jobs           map[string]*DLJob
+	maxConcurrent  int
+	limiter        chan struct{}
+	storeDir       string
+	storeTTL       time.Duration
 }
 
 func NewDownloads() *Downloads {
-	return &Downloads{jobs: map[string]*DLJob{}}
+	return &Downloads{jobs: map[string]*DLJob{}, maxConcurrent: 0}
+}
+
+// SetMaxConcurrent caps the number of concurrent downloads at the process
+// level. Zero (default) means unlimited. Must be called before Start.
+func (d *Downloads) SetMaxConcurrent(n int) {
+	if d == nil {
+		return
+	}
+	if n < 0 {
+		n = 0
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.maxConcurrent = n
+	d.limiter = make(chan struct{}, n)
+}
+
+// SetStore enables persistence of job snapshots to dir. Each job is written as
+// a JSON file "<id>.json" atomically (write .tmp + rename) whenever its
+// progress changes. On startup, files still within ttl are loaded back so that
+// progress survives a restart.
+func (d *Downloads) SetStore(dir string, ttl time.Duration) {
+	if d == nil {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.storeDir = dir
+	d.storeTTL = ttl
+	d.loadLocked()
+}
+
+// loadLocked restores in-progress jobs from disk. Call with d.mu held.
+func (d *Downloads) loadLocked() {
+	if d.storeDir == "" {
+		return
+	}
+	if err := os.MkdirAll(d.storeDir, 0o755); err != nil {
+		return
+	}
+	entries, err := os.ReadDir(d.storeDir)
+	if err != nil {
+		return
+	}
+	now := time.Now()
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		p := filepath.Join(d.storeDir, e.Name())
+		if d.storeTTL > 0 {
+			if st, err := os.Stat(p); err == nil && now.Sub(st.ModTime()) > d.storeTTL {
+				_ = os.Remove(p)
+				continue
+			}
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		var view DLJobView
+		if json.Unmarshal(b, &view) != nil {
+			continue
+		}
+		if _, exists := d.jobs[view.ID]; !exists {
+			d.jobs[view.ID] = &DLJob{
+				ID:     view.ID,
+				Status: view.Status,
+				Error:  view.Error,
+				Items:  view.Items,
+			}
+		}
+	}
+}
+
+// maybePersist writes the current snapshot of a job to disk if a store dir is
+// configured. Failures are silent — persistence is best effort.
+func (d *Downloads) maybePersist(j *DLJob) {
+	if d == nil || j == nil {
+		return
+	}
+	d.mu.Lock()
+	dir := d.storeDir
+	d.mu.Unlock()
+	if dir == "" {
+		return
+	}
+	data, err := json.Marshal(j.Snapshot())
+	if err != nil {
+		return
+	}
+	tmp := filepath.Join(dir, j.ID+".json.tmp")
+	final := filepath.Join(dir, j.ID+".json")
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return
+	}
+	if err := os.Rename(tmp, final); err != nil {
+		_ = os.Remove(tmp)
+	}
 }
 
 func (d *Downloads) Get(id string) *DLJob {
@@ -67,6 +196,25 @@ func (d *Downloads) Get(id string) *DLJob {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.jobs[id]
+}
+
+// List returns snapshots of every tracked job in stable id order.
+func (d *Downloads) List() []DLJobView {
+	if d == nil {
+		return nil
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	ids := make([]string, 0, len(d.jobs))
+	for id := range d.jobs {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	out := make([]DLJobView, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, d.jobs[id].Snapshot())
+	}
+	return out
 }
 
 type HFOpts struct {
@@ -94,22 +242,48 @@ func (d *Downloads) run(parent context.Context, j *DLJob, opt HFOpts) {
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Hour)
 	defer cancel()
 	j.setStatus(DLRunning)
+
+	// Process-level rate limiter. Each downloadOne grabs a slot; a zero
+	// maxConcurrent means unlimited (limiter is nil).
+	acquire := func() {}
+	release := func() {}
+	if d != nil {
+		d.mu.Lock()
+		lim := d.limiter
+		d.mu.Unlock()
+		if lim != nil {
+			acquire = func() {
+				select {
+				case lim <- struct{}{}:
+				case <-ctx.Done():
+				}
+			}
+			release = func() { <-lim }
+		}
+	}
+
 	var failed int
 	for i := range j.Items {
-		if err := downloadOne(ctx, &j.Items[i], opt); err != nil {
+		acquire()
+		err := downloadOne(ctx, j, i, &j.Items[i], opt)
+		release()
+		if err != nil {
 			j.Items[i].Status = DLFailed
 			j.Items[i].Error = err.Error()
 			failed++
 		} else {
 			j.Items[i].Status = DLDone
 		}
+		d.maybePersist(j)
 	}
 	if failed > 0 {
 		j.setStatus(DLFailed)
 		j.Error = fmt.Sprintf("%d download(s) failed", failed)
+		d.maybePersist(j)
 		return
 	}
 	j.setStatus(DLDone)
+	d.maybePersist(j)
 }
 
 func (j *DLJob) setStatus(s DLStatus) {
@@ -129,7 +303,7 @@ func (j *DLJob) Snapshot() DLJobView {
 	}
 }
 
-func downloadOne(ctx context.Context, it *DLItem, opt HFOpts) error {
+func downloadOne(ctx context.Context, j *DLJob, i int, it *DLItem, opt HFOpts) error {
 	if opt.ModelsDir == "" {
 		return fmt.Errorf("comfyui.models_dir is empty")
 	}
@@ -138,6 +312,7 @@ func downloadOne(ctx context.Context, it *DLItem, opt HFOpts) error {
 		return fmt.Errorf("dest escapes models_dir")
 	}
 	it.Dest = dest
+	it.ModelType = modelFolder(it.Class, it.Field)
 	if found, linked, ok := reuseLocalModel(opt.ModelsDir, it.Class, it.Field, it.Value); ok {
 		it.Local = found
 		it.Dest = linked
@@ -176,11 +351,35 @@ func downloadOne(ctx context.Context, it *DLItem, opt HFOpts) error {
 	}
 	it.Total = resp.ContentLength
 	tmp := dest + ".part"
-	f, err := os.Create(tmp)
+	var resume int64
+	if st, err := os.Stat(tmp); err == nil {
+		resume = st.Size()
+	}
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
-	n, err := io.Copy(f, resp.Body)
+	if resume > 0 {
+		if _, err := f.Seek(resume, io.SeekStart); err != nil {
+			_ = f.Close()
+			return err
+		}
+	}
+	// Live per-chunk progress: progress wraps resp.Body and reports cumulative
+	// bytes as io.Copy reads them, so the UI shows progress while the download
+	// runs instead of only at completion. Cumulative bytes are clamped to the
+	// resume offset so partial + resumed bytes are reported correctly.
+	progress := &progressReader{r: resp.Body}
+	progress.onChunk = func(cum int64) {
+		if j != nil {
+			j.mu.Lock()
+			if cum > j.Items[i].Bytes {
+				j.Items[i].Bytes = resume + cum
+			}
+			j.mu.Unlock()
+		}
+	}
+	n, err := io.Copy(f, progress)
 	cerr := f.Close()
 	if err != nil {
 		_ = os.Remove(tmp)
@@ -190,7 +389,11 @@ func downloadOne(ctx context.Context, it *DLItem, opt HFOpts) error {
 		_ = os.Remove(tmp)
 		return cerr
 	}
-	it.Bytes = n
+	if j != nil {
+		j.mu.Lock()
+		j.Items[i].Bytes = resume + n
+		j.mu.Unlock()
+	}
 	if err := os.Rename(tmp, dest); err != nil {
 		_ = os.Remove(tmp)
 		return err
