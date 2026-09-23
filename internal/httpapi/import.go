@@ -198,26 +198,33 @@ const importHTML = `<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>OpenComfy — import workflows</title>
   <style>
-    html { color-scheme: light; }
-    body { font: 15px/1.45 system-ui, sans-serif; margin: 0; background: #f6f7f9; color: #1b1f24; }
-    header { background: #fff; border-bottom: 1px solid #e5e7eb; padding: 1rem 1.5rem; display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
-    h1 { font-size: 1.15rem; margin: 0; }
+    html { color-scheme: dark; }
+    body { font: 15px/1.45 system-ui, sans-serif; margin: 0; background: #0f0f0f; color: #d4d4d4; }
+    header { background: #1a1a1a; border-bottom: 1px solid #2a2a2a; padding: 1rem 1.5rem; display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+    h1 { font-size: 1.15rem; margin: 0; color: #ffffff; }
     main { max-width: 860px; margin: 1.25rem auto; padding: 0 1rem 3rem; }
-    .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 1rem 1.1rem; }
-    label.row { display: flex; gap: .7rem; align-items: flex-start; padding: .65rem 0; border-bottom: 1px solid #f0f1f3; }
+    .card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px; padding: 1rem 1.1rem; }
+    label.row { display: flex; gap: .7rem; align-items: flex-start; padding: .65rem 0; border-bottom: 1px solid #262626; }
     label.row:last-child { border-bottom: 0; }
     label.row.bad { opacity: .85; }
-    .meta { color: #5b6470; font-size: 13px; }
-    .err { color: #b42318; font-size: 13px; margin-top: .2rem; }
-    .ok { color: #087443; }
-    input[type=password], input[type=text] { padding: .4rem .5rem; border: 1px solid #cfd3d8; border-radius: 6px; min-width: 18rem; }
-    button { background: #1f4ea8; color: #fff; border: 0; border-radius: 6px; padding: .45rem .9rem; cursor: pointer; }
-    button:disabled { background: #98a2b3; cursor: not-allowed; }
-    button.ghost { background: #fff; color: #1f4ea8; border: 1px solid #c5d0ea; }
+    label.row.err { color: #f87171; }
+    .meta { color: #8a8a8a; font-size: 13px; }
+    .err { color: #f87171; font-size: 13px; margin-top: .2rem; }
+    .ok { color: #4caf50; }
+    input[type=password], input[type=text] { padding: .4rem .5rem; background: #242424; border: 1px solid #2a2a2a; color: #d4d4d4; border-radius: 6px; min-width: 18rem; }
+    input[type=password]:focus, input[type=text]:focus { border-color: #f04683; outline: none; box-shadow: 0 0 0 2px rgba(240, 70, 131, 0.25); }
+    input::placeholder { color: #6b6b6b; }
+    button { background: #f04683; color: #fff; border: 0; border-radius: 6px; padding: .45rem .9rem; cursor: pointer; }
+    button:hover { background: #ff5a95; }
+    button:disabled { background: #4a4a4a; color: #7a7a7a; cursor: not-allowed; }
+    button.ghost { background: #242424; color: #f04683; border: 1px solid #2a2a2a; }
+    button.ghost:hover { border-color: #f04683; }
     button.danger { background: #b42318; }
+    button.danger:hover { background: #d3272a; }
     .bar { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; margin: 1rem 0; }
-    a { color: #1f4ea8; }
-    h2 { font-size: 1rem; margin: 0 0 .5rem; }
+    a { color: #f04683; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    h2 { font-size: 1rem; margin: 0 0 .5rem; color: #ffffff; }
   </style>
 </head>
 <body>
