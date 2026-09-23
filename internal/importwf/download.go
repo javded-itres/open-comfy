@@ -349,7 +349,7 @@ func downloadOne(ctx context.Context, j *DLJob, i int, it *DLItem, opt HFOpts) e
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 400))
 		return fmt.Errorf("download %s: %s", resp.Status, b)
 	}
-	it.Total = resp.ContentLength
+	it.Total = resolveContentLength(u, resp, opt.Token)
 	tmp := dest + ".part"
 	var resume int64
 	if st, err := os.Stat(tmp); err == nil {
@@ -385,6 +385,10 @@ func downloadOne(ctx context.Context, j *DLJob, i int, it *DLItem, opt HFOpts) e
 		_ = os.Remove(tmp)
 		return err
 	}
+	if ctx.Err() != nil {
+		_ = os.Remove(tmp)
+		return ctx.Err()
+	}
 	if cerr != nil {
 		_ = os.Remove(tmp)
 		return cerr
@@ -399,4 +403,32 @@ func downloadOne(ctx context.Context, j *DLJob, i int, it *DLItem, opt HFOpts) e
 		return err
 	}
 	return nil
+}
+
+// resolveContentLength returns the download size for a HEAD/GET response,
+// falling back to a HEAD request when the GET lacks a Content-Length
+// (chunked transfer encoding). A zero return means the size is unknown.
+func resolveContentLength(u string, resp *http.Response, token string) int64 {
+	if resp.ContentLength > 0 {
+		return resp.ContentLength
+	}
+	req, err := http.NewRequestWithContext(resp.Request.Context(), http.MethodHead, u, nil)
+	if err != nil {
+		return 0
+	}
+	req.Header.Set("User-Agent", "OpenComfy")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	cl := &http.Client{Timeout: 30 * time.Second}
+	hr, err := cl.Do(req)
+	if err != nil {
+		// A HEAD failure is not fatal — report bytes as they arrive.
+		return 0
+	}
+	defer hr.Body.Close()
+	if hr.StatusCode >= 300 {
+		return 0
+	}
+	return hr.ContentLength
 }
