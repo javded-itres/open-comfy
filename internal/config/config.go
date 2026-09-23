@@ -23,6 +23,7 @@ type Config struct {
 	Jobs          Jobs    `yaml:"jobs"`
 	Metrics       Metrics `yaml:"metrics"`
 	Auth          Auth    `yaml:"auth"`
+	DownloadsDir  string  `yaml:"downloads_dir"`
 	ModelsFile    string  `yaml:"models_file"`
 	WorkflowsDir  string  `yaml:"workflows_dir"`
 	SkipWorkflow  bool    `yaml:"-"`

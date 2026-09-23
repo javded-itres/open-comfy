@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -51,6 +52,12 @@ func New(cfg *config.Config, a *auth.Service, cat *catalog.Catalog, c *comfy.Cli
 		DL:      importwf.NewDownloads(),
 		videoCh: make(chan string, 64),
 	}
+	s.DL.SetMaxConcurrent(cfg.ComfyUI.MaxInFlight)
+	storeDir := cfg.DownloadsDir
+	if storeDir == "" {
+		storeDir = filepath.Join(os.Getenv("OPENCOMFY_DATA"), "downloads")
+	}
+	s.DL.SetStore(storeDir, 24*time.Hour)
 	return s
 }
 
@@ -105,6 +112,8 @@ func (s *Server) Handler() http.Handler {
 	s.protect(mux, "POST /v1/comfy/analyze", s.analyzeComfyWorkflow)
 	s.protect(mux, "POST /v1/comfy/provision", s.provisionComfyWorkflow)
 	s.protect(mux, "GET /v1/comfy/downloads/{id}", s.comfyDownloadStatus)
+	s.protect(mux, "GET /v1/comfy/queue", s.comfyQueue)
+	s.protect(mux, "GET /v1/comfy/downloads", s.comfyDownloadsList)
 	s.protect(mux, "POST /v1/comfy/import", s.importComfyWorkflows)
 	s.protect(mux, "POST /v1/comfy/unload", s.unloadComfyModels)
 	s.protect(mux, "DELETE /v1/models/{id}", s.deleteModel)

@@ -105,6 +105,21 @@ func (s *Server) comfyDownloadStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, snap)
 }
 
+func (s *Server) comfyQueue(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	st, err := s.Comfy.Status(ctx)
+	if err != nil {
+		writeError(w, 502, "api_error", "comfy_unavailable", err.Error(), "")
+		return
+	}
+	writeJSON(w, 200, st)
+}
+
+func (s *Server) comfyDownloadsList(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]any{"object": "list", "data": s.DL.List()})
+}
+
 func (s *Server) listComfyWorkflows(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
@@ -239,6 +254,15 @@ const importHTML = `<!DOCTYPE html>
         <button class="ghost" id="reload" type="button">Обновить</button>
       </div>
       <div id="status" class="meta"></div>
+    </div>
+    <div class="card" style="margin-top:1rem">
+      <h2>Загрузки и очередь ComfyUI</h2>
+      <p class="meta">Прогесс весов по мере скачивания (resume из <code>.part</code>). Статус очереди ComfyUI — сколько jobs в полёте и в ожидании.</p>
+      <div class="bar">
+        <span id="queue" class="meta">очередь: —</span>
+        <button class="ghost" id="dl-refresh" type="button">Обновить</button>
+      </div>
+      <div id="dl-list"></div>
     </div>
     <div class="card" style="margin-top:1rem">
       <h2>Загрузить JSON в ComfyUI</h2>
@@ -478,6 +502,48 @@ const importHTML = `<!DOCTYPE html>
         await new Promise(res => setTimeout(res, 2000));
       }
     };
+    async function pollDownloads() {
+      try {
+        const q = await fetch("/v1/comfy/queue", { headers: headers() });
+        if (q.ok) {
+          const s = await q.json();
+          document.getElementById("queue").textContent =
+            "очередь ComfyUI: " + (s.in_flight || 0) + " в полёте, " + (s.waiting || 0) + " в ожидании";
+        }
+      } catch (e) {}
+      let data = [];
+      try {
+        const r = await fetch("/v1/comfy/downloads", { headers: headers() });
+        const j = await r.json();
+        data = j.data || [];
+      } catch (e) {}
+      if (!data.length) {
+        document.getElementById("dl-list").innerHTML = "<p class='meta'>нет активных загрузок</p>";
+        return;
+      }
+      const rows = data.map(job => {
+        const pct = job.items && job.items.length
+          ? Math.round(job.items.reduce((a, it) => a + (it.bytes || 0), 0) / Math.max(1, job.items.reduce((a, it) => a + (it.total || 0), 0)) * 100)
+          : 0;
+        const items = (job.items || []).map(it => {
+          const p = it.total ? Math.round(it.bytes / it.total * 100) : 0;
+          const src = it.local ? " ← disk " + it.local : (it.repo ? " ← " + it.repo : "");
+          const typeTag = it.model_type ? " <span class='meta'>" + it.model_type + "</span>" : "";
+          const err = it.error ? " :: <span class='err'>" + it.error + "</span>" : "";
+          return "<div style='margin:.35rem 0'>" +
+            "<div style='display:flex;justify-content:space-between'><span>" + (it.status || "") + " " + (it.value || "") + typeTag + src + "</span><span class='meta'>" + p + "%</span></div>" +
+            "<div style='background:#eef0f3;border-radius:4px;height:6px;overflow:hidden'><div style='width:" + p + "%;background:#087443;height:100%'></div></div>" +
+            "</div>";
+        }).join("");
+        return "<div style='border-bottom:1px solid #f0f1f3;padding:.5rem 0'><div style='display:flex;justify-content:space-between'><b>" + (job.status || "") + "</b><span class='meta'>" + pct + "%</span></div>" +
+          "<div style='background:#eef0f3;border-radius:4px;height:8px;overflow:hidden;margin:.35rem 0'><div style='width:" + pct + "%;background:#1f4ea8;height:100%'></div></div>" +
+          items + "</div>";
+      }).join("");
+      document.getElementById("dl-list").innerHTML = rows;
+    }
+    document.getElementById("dl-refresh").onclick = pollDownloads;
+    setInterval(pollDownloads, 2000);
+    pollDownloads();
   </script>
 </body>
 </html>

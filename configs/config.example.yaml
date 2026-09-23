@@ -39,5 +39,6 @@ metrics:
 auth:
   disabled: false
   keys_file: /etc/opencomfy/keys.yaml
+downloads_dir: ""  # empty = <OPENCOMFY_DATA>/downloads; JSON snapshots of download jobs, TTL 24h
 models_file: /etc/opencomfy/models.yaml
 workflows_dir: /etc/opencomfy/workflows

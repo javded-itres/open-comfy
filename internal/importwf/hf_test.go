@@ -62,7 +62,7 @@ func TestDownloadMappedFile(t *testing.T) {
 	t.Cleanup(func() { hfAPI = old })
 	dir := t.TempDir()
 	it := &DLItem{Value: "ZIT/foo.safetensors", Field: "unet_name", Class: "UNETLoader"}
-	if err := downloadOne(context.Background(), it, HFOpts{
+	if err := downloadOne(context.Background(), nil, 0, it, HFOpts{
 		ModelsDir: dir,
 		ModelMap:  map[string]string{"ZIT/foo.safetensors": "owner/repo:foo.safetensors"},
 	}); err != nil {
@@ -170,7 +170,7 @@ func TestDownloadReusesBasenameInOtherFolder(t *testing.T) {
 		t.Fatal(err)
 	}
 	it := &DLItem{Value: "ZIT/z_image_turbo_bf16.safetensors", Field: "unet_name", Class: "UNETLoader"}
-	if err := downloadOne(context.Background(), it, HFOpts{ModelsDir: dir}); err != nil {
+	if err := downloadOne(context.Background(), nil, 0, it, HFOpts{ModelsDir: dir}); err != nil {
 		t.Fatal(err)
 	}
 	if hits != 0 {
@@ -199,7 +199,7 @@ func TestDownloadSkipsExisting(t *testing.T) {
 		t.Fatal(err)
 	}
 	it := &DLItem{Value: "ae.safetensors", Field: "vae_name", Class: "VAELoader"}
-	if err := downloadOne(context.Background(), it, HFOpts{
+	if err := downloadOne(context.Background(), nil, 0, it, HFOpts{
 		ModelsDir: dir,
 		ModelMap:  map[string]string{"ae.safetensors": "owner/repo:ae.safetensors"},
 	}); err != nil {
