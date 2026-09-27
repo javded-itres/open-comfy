@@ -36,7 +36,17 @@ func DecodeDataURL(s string) ([]byte, error) {
 	return base64.StdEncoding.DecodeString(data)
 }
 
-func Run(ctx context.Context, client *comfy.Client, cat *catalog.Catalog, m *catalog.Model, req workflow.Request, promptID string, onProgress func(pct int, pos int)) (Result, comfy.PromptResult, error) {
+// Runner is the ComfyUI port engine needs. *comfy.Client implements it.
+type Runner interface {
+	UploadImage(ctx context.Context, filename string, data []byte) (comfy.UploadResult, error)
+	QueuePrompt(ctx context.Context, graph map[string]any, promptID string) (comfy.PromptResult, error)
+	PollInterval() time.Duration
+	Queue(ctx context.Context) (comfy.Queue, error)
+	History(ctx context.Context, promptID string) (map[string]any, error)
+	View(ctx context.Context, a comfy.Artifact) ([]byte, error)
+}
+
+func Run(ctx context.Context, client Runner, cat *catalog.Catalog, m *catalog.Model, req workflow.Request, promptID string, onProgress func(pct int, pos int)) (Result, comfy.PromptResult, error) {
 	graph, err := catalog.LoadGraph(cat.WorkflowsDir, m.Workflow)
 	if err != nil {
 		return Result{}, comfy.PromptResult{}, err

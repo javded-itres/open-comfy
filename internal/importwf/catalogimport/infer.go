@@ -1,4 +1,4 @@
-package importwf
+package catalogimport
 
 import (
 	"fmt"

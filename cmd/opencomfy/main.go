@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -23,9 +24,10 @@ import (
 	"github.com/javded-itres/open-comfy/internal/ids"
 	"github.com/javded-itres/open-comfy/internal/importwf"
 	"github.com/javded-itres/open-comfy/internal/jobs"
+	"github.com/javded-itres/open-comfy/internal/queue"
 )
 
-var version = "0.1.0"
+var version = "0.1.1"
 
 func main() {
 	configPath := flag.String("config", os.Getenv("OPENCOMFY_CONFIG"), "path to config.yaml")
@@ -138,8 +140,16 @@ func main() {
 
 	jobStore := jobs.New(cfg.Jobs.Dir, cfg.JobTTL())
 	fileStore := files.New(cfg.Files.Dir, secret, cfg.FileTTL(), cfg.Origin)
+	admit := queue.New(cfg.ComfyUI.MaxInFlight, cfg.ComfyUI.MaxWaiting)
+	dl := importwf.NewDownloads()
+	dl.SetMaxConcurrent(cfg.ComfyUI.MaxInFlight)
+	storeDir := cfg.DownloadsDir
+	if storeDir == "" {
+		storeDir = filepath.Join(os.Getenv("OPENCOMFY_DATA"), "downloads")
+	}
+	dl.SetStore(storeDir, 24*time.Hour)
 
-	api := httpapi.New(cfg, authSvc, cat, client, jobStore, fileStore)
+	api := httpapi.New(cfg, authSvc, cat, client, jobStore, fileStore, admit, dl)
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 	api.StartWorkers(ctx)

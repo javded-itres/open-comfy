@@ -24,7 +24,7 @@ Clients (OpenAI SDK, LiteLLM, MikroLLM, holix-media) talk REST. Holix is a clien
 
 Rules:
 
-1. Construct collaborators in `main` (or a tiny `newApp` helper in `cmd/`) and pass them in. Today: `config` → `auth` → `catalog` → `comfy.Client` → `jobs` → `files` → `httpapi.New`.
+1. Construct collaborators in `main` (or a tiny `newApp` helper in `cmd/`) and pass them in. Today: `config` → `auth` → `catalog` → `comfy.Client` → `jobs` → `files` → `queue.Admission` → `importwf.Downloads` → `httpapi.New`.
 2. Dependencies flow **inward**. `httpapi` may call `engine`, `importwf`, `auth`, `catalog`. Domain packages must not import `httpapi`.
 3. Define **small interfaces at the consumer** when a second implementation or a fake is needed (`ComfyQueue`, `JobStore`, `FileStore`). Do not invent interfaces “for SOLID” with a single production type.
 4. No package-level mutable clients, downloaders, or HTTP servers. Package `var` is allowed only for pure tables (allowlists, generic filenames) or test stubs that tests reset.
@@ -39,7 +39,11 @@ cmd/opencomfy          composition root
 internal/httpapi       transport (OpenAI HTTP, chat shim, MCP, /import)
         │
         ├──────────────► internal/engine      one ComfyUI run (inject → prompt → poll → view)
-        ├──────────────► internal/importwf    catalog import / provision (bounded context)
+        ├──────────────► internal/importwf    facade + provision (bounded context)
+        │                      ├─ convert         UI graph → API graph
+        │                      ├─ analyze         missing nodes / weights
+        │                      ├─ hf              Hub resolve + weight downloads
+        │                      └─ catalogimport   userdata → models.yaml
         │
         ▼
 internal/workflow      maps_to inject, prompt clean
@@ -57,8 +61,10 @@ internal/ids           UUID / public ids
 
 - `catalog`, `workflow`, `comfy`, `auth`, `jobs`, `files`, `queue`, `ids`, `config` → `httpapi` or `engine`
 - `engine` → `httpapi`, `importwf`, `jobs` (engine returns bytes + `PromptResult`; HTTP/jobs persist)
-- `importwf` → `httpapi`, `engine` (import must not queue `/prompt`)
-- A new package must not import `net/http` unless it is `httpapi` or `comfy` (the ComfyUI adapter)
+- `importwf` and its subpackages → `httpapi`, `engine` (import must not queue `/prompt`)
+- subpackages of `importwf` must not import the `importwf` root
+- `analyze` may import `convert` and `hf`; `hf` must not import `analyze` (map `ModelNeed` → `hf.WeightRef` at the root)
+- A new package must not import `net/http` unless it is `httpapi`, `comfy`, or an `importwf` subpackage that talks to Hugging Face or the node-pack map (`hf`, `analyze`)
 
 Keep the graph acyclic. `go list` / compile is the check.
 
@@ -70,7 +76,7 @@ Keep the graph acyclic. `go list` / compile is the check.
 | **O** | New models = YAML `maps_to`, not `switch` on family names. New Comfy node packs for provision = allowlist, not a new installer core. |
 | **L** | Adapters honor the same contracts as production (`QueuePrompt` returns requested **and** returned `prompt_id`; `/queue` item `[1]` is `prompt_id`). |
 | **I** | Do not grow `httpapi.Server` into a god object with business logic. Handlers parse, authorize, call one use-case, write JSON. |
-| **D** | `engine` depends on a ComfyUI port (today `*comfy.Client`). New backends are new adapters, not `if kind ==` inside inject. |
+| **D** | `engine.Run` depends on `engine.Runner`. `*comfy.Client` is the production implementation. New backends are new adapters, not `if kind ==` inside inject. |
 
 ## 5. Package contracts
 
@@ -100,13 +106,13 @@ Explicit `maps_to[{node,field,path}]` only. No family heuristics. `CleanChatProm
 
 ### `internal/catalog`
 
-Named models, aliases, size/quality, `ValidateModel`, `EnsureSaver`. Invalid **one** model is skipped (log + continue); do not fail the whole process unless **zero** models remain.
+Named models, aliases, size/quality, `ValidateModel`, `EnsureSaver`. One file per reason to change: `load.go`, `graph.go`, `validate.go`, `saver.go`, `schema.go`. Invalid **one** model is skipped (log + continue); do not fail the whole process unless **zero** models remain.
 
 UI graphs (`nodes`/`links`) are rejected at catalog load. API graphs with leftover UUID `class_type` are rejected at convert and at `engine.Run`.
 
 ### `internal/comfy`
 
-The only package that speaks ComfyUI HTTP: `/prompt`, `/history`, `/queue`, `/view`, `/upload/image`, `/object_info`, `/userdata`, `/workflow/convert`. Reuse this client. Do not `http.Get` ComfyUI from `httpapi` or `importwf`.
+The only package that speaks ComfyUI HTTP: `/prompt`, `/history`, `/queue`, `/view`, `/upload/image`, `/object_info`, `/userdata`, `/workflow/convert`. Methods are split by area (`prompt.go`, `queue.go`, `artifact.go`, `upload.go`, `convert.go`, `userdata.go`). Reuse this client. Do not `http.Get` ComfyUI from `httpapi` or `importwf`.
 
 `/queue` list item is `[number, prompt_id, ...]`. Poll history with the **returned** `prompt_id`. Non-UUID ids are replaced with `ids.UUID()` before `QueuePrompt`.
 
@@ -123,11 +129,18 @@ Hard rules:
 - Disk search by exact relative path, then **unique** basename; generic names (`model.safetensors`) need `model_map` or an exact path.
 - Hub search is by **repo name**; official org index is the fallback. Prefer `Comfy-Org` / `Lightricks` over random forks. Do not substitute a different quant (fp8 ≠ nvfp4).
 
-This package is already large. **Do not add more unrelated features here.** Next split (when touching the area): `convert` / `analyze` / `hf` / `catalogimport` as subpackages under `importwf`, still without `httpapi` imports.
+Root package is the facade (`List`, `ImportSelected`, `Provision`, `Downloads`) plus node-pack install. Work lives in subpackages:
+
+- `convert` — UI/API convert, subgraph expand, frontend-only expand
+- `analyze` — missing classes and weights, node allowlist
+- `hf` — Hub resolve, on-disk reuse, download jobs
+- `catalogimport` — selected userdata workflows into `models.yaml`
+
+Do not add a new concern to the root. Subpackages still must not import `httpapi`.
 
 ### `internal/auth`, `jobs`, `files`, `queue`, `ids`, `config`
 
-Keep them boring. Auth: Bearer `sk-` or `X-Api-Key`, SHA-256, tumbling RPM, model allowlist. Files: HMAC GET **without** Authorization. Jobs: atomic JSON, mutex per id, TTL. Queue: in-process admission (`max_in_flight` / `max_waiting`).
+Keep them boring. Auth takes header strings (`BearerToken`, `ClientHost`), not `*http.Request`: Bearer `sk-` or `X-Api-Key`, SHA-256, tumbling RPM, model allowlist. Files: HMAC GET **without** Authorization. Jobs: atomic JSON, mutex per id, TTL. Queue: in-process admission (`max_in_flight` / `max_waiting`), constructed in `main`.
 
 ## 6. Performance
 
@@ -165,7 +178,7 @@ Practical limits (soft, but PRs that grow past them must split):
 
 - HTTP handler function: parse → authorize → one use-case → write. No nested Comfy poll loops.
 - `httpapi.Server` holds collaborators only (composition). New endpoints get a new file, not more methods that call ComfyUI directly.
-- Do not dump HTML/JS into Go unless it is the existing `/import` page; keep it one constant, do not grow a SPA there.
+- The `/import` page is `import_page.html`, embedded once. Do not grow a SPA there, and do not add another HTML page in Go.
 - New ComfyUI routes go on `comfy.Client`, not as ad-hoc `http.NewRequest` in handlers.
 
 ## 9. Testing
@@ -204,12 +217,8 @@ These exist today. New code must not make them worse; touch-and-split is allowed
 
 | Gap | Where | Rule it violates |
 |-----|--------|------------------|
-| `importwf` mixes convert, analyze, HF, git, catalog import | `internal/importwf` (~3k lines) | §5 split, §8 |
-| `catalog.go` holds YAML, validate, schema, EnsureSaver | `internal/catalog/catalog.go` | S |
-| `comfy.Client` is a concrete mega-adapter | `internal/comfy/client.go` | I — split methods by area when adding more |
-| `httpapi/import.go` embeds the `/import` HTML page | `internal/httpapi` | S — keep the constant, no new UI there |
-| Package-level HF API base + official-org cache | `importwf/hf.go` | §2.4 — tests must `t.Cleanup` reset |
-| `engine.Run` takes `*comfy.Client` not a port interface | `internal/engine` | D — add an interface at first fake |
+| Package-level HF API base + official-org cache | `importwf/hf/hf.go` | §2.4 — tests must `t.Cleanup` reset |
 | Variant C (nodes/weights) was a DESIGN non-goal | `importwf` + `/v1/comfy/provision` | Product evolved; keep it **off** the `/prompt` path |
+| Prometheus text is written in the HTTP handler | `httpapi` `metrics` | DESIGN once listed `internal/metrics`; three gauges do not justify a package |
 
 Constructor DI in `cmd/opencomfy` → `httpapi.New` is the pattern to copy. Stdlib + `yaml.v3` only (`go.mod`).

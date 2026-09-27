@@ -1,4 +1,4 @@
-package importwf
+package catalogimport
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 
 	"github.com/javded-itres/open-comfy/internal/catalog"
 	"github.com/javded-itres/open-comfy/internal/comfy"
+	"github.com/javded-itres/open-comfy/internal/importwf/convert"
 )
 
 type Item struct {
@@ -58,12 +59,12 @@ func inspect(client *comfy.Client, ctx context.Context, name string, info map[st
 		it.Errors = []string{"fetch: " + err.Error()}
 		return it
 	}
-	graph, err := ConvertWith(ctx, client, raw, info)
+	graph, err := convert.ConvertWith(ctx, client, raw, info)
 	if err != nil {
 		it.Errors = []string{"convert: " + err.Error()}
 		return it
 	}
-	graph, err = ExpandFrontend(ctx, client, graph)
+	graph, err = convert.ExpandFrontend(ctx, client, graph)
 	if err != nil {
 		it.Errors = []string{err.Error()}
 		return it
@@ -136,12 +137,12 @@ func ImportSelected(ctx context.Context, client *comfy.Client, modelsFile, workf
 			res.Failed = append(res.Failed, name+": "+err.Error())
 			continue
 		}
-		graph, err := ConvertWith(ctx, client, raw, info)
+		graph, err := convert.ConvertWith(ctx, client, raw, info)
 		if err != nil {
 			res.Failed = append(res.Failed, name+": "+err.Error())
 			continue
 		}
-		graph, err = ExpandFrontend(ctx, client, graph)
+		graph, err = convert.ExpandFrontend(ctx, client, graph)
 		if err != nil {
 			res.Failed = append(res.Failed, name+": "+err.Error())
 			continue

@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -39,26 +38,19 @@ type Server struct {
 	once    sync.Once
 }
 
-func New(cfg *config.Config, a *auth.Service, cat *catalog.Catalog, c *comfy.Client, j *jobs.Store, f *files.Store) *Server {
-	s := &Server{
+func New(cfg *config.Config, a *auth.Service, cat *catalog.Catalog, c *comfy.Client, j *jobs.Store, f *files.Store, admit *queue.Admission, dl *importwf.Downloads) *Server {
+	return &Server{
 		Cfg:     cfg,
 		Auth:    a,
 		Cat:     cat,
 		Comfy:   c,
 		Jobs:    j,
 		Files:   f,
-		Admit:   queue.New(cfg.ComfyUI.MaxInFlight, cfg.ComfyUI.MaxWaiting),
+		Admit:   admit,
 		Log:     log.New(os.Stderr, "", log.LstdFlags),
-		DL:      importwf.NewDownloads(),
+		DL:      dl,
 		videoCh: make(chan string, 64),
 	}
-	s.DL.SetMaxConcurrent(cfg.ComfyUI.MaxInFlight)
-	storeDir := cfg.DownloadsDir
-	if storeDir == "" {
-		storeDir = filepath.Join(os.Getenv("OPENCOMFY_DATA"), "downloads")
-	}
-	s.DL.SetStore(storeDir, 24*time.Hour)
-	return s
 }
 
 func (s *Server) StartWorkers(ctx context.Context) {
@@ -140,7 +132,7 @@ type principal struct {
 
 func (s *Server) protect(mux *http.ServeMux, pattern string, h http.HandlerFunc) {
 	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-		ip := auth.ClientIP(r)
+		ip := auth.ClientHost(r.RemoteAddr)
 		if s.Auth.FailLocked(ip) {
 			writeError(w, 429, "rate_limit_error", "rate_limit_exceeded", "too many failed auth attempts", "")
 			return
@@ -151,7 +143,7 @@ func (s *Server) protect(mux *http.ServeMux, pattern string, h http.HandlerFunc)
 			h(w, r)
 			return
 		}
-		plain := auth.Bearer(r)
+		plain := auth.BearerToken(r.Header.Get("Authorization"), r.Header.Get("X-Api-Key"))
 		k, ok := s.Auth.Lookup(plain)
 		if !ok {
 			if s.Auth.NoteFail(ip) {
@@ -206,7 +198,7 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if config.MetricsNeedAuth(s.Cfg) {
-		if _, ok := s.Auth.Lookup(auth.Bearer(r)); !ok && !s.Cfg.Auth.Disabled {
+		if _, ok := s.Auth.Lookup(auth.BearerToken(r.Header.Get("Authorization"), r.Header.Get("X-Api-Key"))); !ok && !s.Cfg.Auth.Disabled {
 			writeError(w, 401, "invalid_request_error", "invalid_api_key", "invalid api key", "")
 			return
 		}
@@ -224,7 +216,7 @@ func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 	okHMAC := s.Files.Verify(id, exp, sig)
 	var keyHash string
 	if !okHMAC {
-		plain := auth.Bearer(r)
+		plain := auth.BearerToken(r.Header.Get("Authorization"), r.Header.Get("X-Api-Key"))
 		k, ok := s.Auth.Lookup(plain)
 		if !ok && !s.Cfg.Auth.Disabled {
 			writeError(w, 404, "invalid_request_error", "not_found", "not found", "")

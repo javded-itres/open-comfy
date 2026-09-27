@@ -1,4 +1,4 @@
-package importwf
+package hf
 
 import (
 	"context"
@@ -54,7 +54,7 @@ func resetOfficialHFIndex() {
 }
 
 func ResolveHF(ctx context.Context, value string, token string, allow []string, modelMap map[string]string, preferFolder string) (HFHit, error) {
-	value = normalizeModelPath(value)
+	value = NormalizeModelPath(value)
 	if value == "" || strings.Contains(value, "..") {
 		return HFHit{}, fmt.Errorf("bad model path")
 	}
@@ -76,7 +76,7 @@ func ResolveHF(ctx context.Context, value string, token string, allow []string, 
 	return hit, nil
 }
 
-func collectHFMap(raw json.RawMessage) map[string]string {
+func CollectHFMap(raw json.RawMessage) map[string]string {
 	out := map[string]string{}
 	if len(raw) == 0 {
 		return out
@@ -124,7 +124,7 @@ func addHFLinks(out map[string]string, s string) {
 	}
 }
 
-func mergeHFMap(cfg, fromWorkflow map[string]string) map[string]string {
+func MergeHFMap(cfg, fromWorkflow map[string]string) map[string]string {
 	out := map[string]string{}
 	for k, v := range fromWorkflow {
 		k, v = strings.TrimSpace(k), strings.TrimSpace(v)
@@ -423,6 +423,13 @@ func hfGet(ctx context.Context, rawURL, token string) ([]byte, error) {
 		return nil, fmt.Errorf("huggingface %s: %s", resp.Status, truncateBytes(b, 180))
 	}
 	return b, nil
+}
+
+func truncateBytes(b []byte, n int) string {
+	if len(b) <= n {
+		return string(b)
+	}
+	return string(b[:n]) + "…"
 }
 
 func modelFolder(class, field string) string {

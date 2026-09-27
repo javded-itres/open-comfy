@@ -1,4 +1,4 @@
-package importwf
+package analyze
 
 import (
 	"encoding/json"
@@ -11,20 +11,6 @@ import (
 func TestMain(m *testing.M) {
 	UseEmptyNodeMap()
 	os.Exit(m.Run())
-}
-
-func TestSafeWorkflowName(t *testing.T) {
-	n, err := SafeWorkflowName("../foo/bar.json")
-	if err != nil || n != "bar.json" {
-		t.Fatalf("%q %v", n, err)
-	}
-	n, err = SafeWorkflowName("My Graph")
-	if err != nil || n != "My Graph.json" {
-		t.Fatalf("%q %v", n, err)
-	}
-	if _, err := SafeWorkflowName(""); err == nil {
-		t.Fatal("empty")
-	}
 }
 
 func TestAnalyzeMissingNodeAndModel(t *testing.T) {

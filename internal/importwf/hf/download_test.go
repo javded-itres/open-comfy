@@ -1,4 +1,4 @@
-package importwf
+package hf
 
 import (
 	"context"
@@ -16,7 +16,7 @@ func TestDownloadsSetStorePersistsAndRestores(t *testing.T) {
 
 	// Start a job that fails immediately (no models dir) so it reaches a
 	// persisted failed state quickly.
-	job := d.Start(context.Background(), []ModelNeed{
+	job := d.Start(context.Background(), []WeightRef{
 		{Value: "org/repo", Field: "model", Class: "SomeClass"},
 	}, HFOpts{})
 
@@ -58,7 +58,7 @@ func TestDownloadsSetStoreTTLExpiry(t *testing.T) {
 	d := NewDownloads()
 	d.SetStore(dir, time.Hour)
 
-	job := d.Start(context.Background(), []ModelNeed{
+	job := d.Start(context.Background(), []WeightRef{
 		{Value: "org/repo", Field: "model", Class: "SomeClass"},
 	}, HFOpts{})
 

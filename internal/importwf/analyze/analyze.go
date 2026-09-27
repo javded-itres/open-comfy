@@ -1,4 +1,4 @@
-package importwf
+package analyze
 
 import (
 	"encoding/json"
@@ -8,6 +8,8 @@ import (
 
 	"github.com/javded-itres/open-comfy/internal/catalog"
 	"github.com/javded-itres/open-comfy/internal/comfy"
+	"github.com/javded-itres/open-comfy/internal/importwf/convert"
+	"github.com/javded-itres/open-comfy/internal/importwf/hf"
 )
 
 type Analysis struct {
@@ -46,7 +48,7 @@ func Analyze(raw json.RawMessage, info map[string]comfy.NodeDef, allow []string,
 		return a
 	}
 	classes, models := collectDeps(raw, info)
-	if isUIWorkflow(raw) {
+	if convert.IsUIWorkflow(raw) {
 		a.Format = "ui"
 	} else if g, err := catalog.UnwrapRaw(raw); err == nil {
 		a.Format = "api"
@@ -87,7 +89,7 @@ func Analyze(raw json.RawMessage, info map[string]comfy.NodeDef, allow []string,
 	}
 	seenM := map[string]bool{}
 	for _, m := range models {
-		m.Value = normalizeModelPath(m.Value)
+		m.Value = hf.NormalizeModelPath(m.Value)
 		if m.Value == "" {
 			continue
 		}
@@ -104,7 +106,7 @@ func Analyze(raw json.RawMessage, info map[string]comfy.NodeDef, allow []string,
 			continue
 		}
 		if modelsDir != "" {
-			if found, dest, ok := reuseLocalModel(modelsDir, m.Class, m.Field, m.Value); ok {
+			if found, dest, ok := hf.ReuseLocalModel(modelsDir, m.Class, m.Field, m.Value); ok {
 				m.Local = found
 				if dest != "" && dest != found {
 					m.Local = found + " → " + dest
@@ -139,7 +141,7 @@ func collectDeps(raw json.RawMessage, info map[string]comfy.NodeDef) (classes []
 		return nil, nil
 	}
 	if nodes, ok := root["nodes"].([]any); ok {
-		defs := subgraphDefs(root)
+		defs := convert.SubgraphDefs(root)
 		collectUINodes(nodes, defs, "", info, &classes, &models)
 		return classes, models
 	}
@@ -172,11 +174,11 @@ func collectUINodes(nodes []any, defs map[string]map[string]any, prefix string, 
 			continue
 		}
 		ct, _ := nm["type"].(string)
-		id := nodeIDString(nm["id"])
+		id := convert.NodeIDString(nm["id"])
 		if prefix != "" {
 			id = prefix + ":" + id
 		}
-		if def, ok := defs[ct]; ok && catalogUUID(ct) {
+		if def, ok := defs[ct]; ok && convert.CatalogUUID(ct) {
 			inner, _ := def["nodes"].([]any)
 			collectUINodes(inner, defs, id, info, classes, models)
 			continue
@@ -197,14 +199,14 @@ func collectUINodes(nodes []any, defs map[string]map[string]any, prefix string, 
 				continue
 			}
 			*models = append(*models, ModelNeed{Field: field, Value: s, Node: id, Class: ct})
-			seen[strings.ToLower(path.Base(normalizeModelPath(s)))] = true
+			seen[strings.ToLower(path.Base(hf.NormalizeModelPath(s)))] = true
 		}
 		i := 0
 		for _, s := range widgetStringList(nm) {
 			if !looksLikeWeightFile(s) {
 				continue
 			}
-			base := strings.ToLower(path.Base(normalizeModelPath(s)))
+			base := strings.ToLower(path.Base(hf.NormalizeModelPath(s)))
 			if seen[base] {
 				continue
 			}
@@ -216,11 +218,11 @@ func collectUINodes(nodes []any, defs map[string]map[string]any, prefix string, 
 }
 
 func instanceValuesDef(node map[string]any, def comfy.NodeDef) map[string]any {
-	out := instanceValues(node)
+	out := convert.InstanceValues(node)
 	if len(out) > 0 {
 		return out
 	}
-	names := widgetNames(def)
+	names := convert.WidgetNames(def)
 	if len(names) == 0 {
 		return out
 	}
@@ -230,7 +232,7 @@ func instanceValuesDef(node map[string]any, def comfy.NodeDef) map[string]any {
 	}
 	wi := 0
 	for _, name := range names {
-		for wi < len(arr) && isControlWidget(arr[wi]) {
+		for wi < len(arr) && convert.IsControlWidget(arr[wi]) {
 			wi++
 		}
 		if wi >= len(arr) {
@@ -272,7 +274,7 @@ func guessModelField(class string, i int) string {
 }
 
 func looksLikeWeightFile(v string) bool {
-	switch strings.ToLower(path.Ext(normalizeModelPath(v))) {
+	switch strings.ToLower(path.Ext(hf.NormalizeModelPath(v))) {
 	case ".safetensors", ".ckpt", ".pt", ".pth", ".bin", ".gguf", ".sft", ".onnx":
 		return true
 	}

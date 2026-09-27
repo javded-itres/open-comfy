@@ -1,4 +1,4 @@
-package importwf
+package convert
 
 import (
 	"context"
@@ -20,7 +20,7 @@ func IsAPIFormat(raw json.RawMessage) bool {
 // is missing or still returns UUID subgraph nodes.
 func ConvertWith(ctx context.Context, client *comfy.Client, raw json.RawMessage, info map[string]comfy.NodeDef) (map[string]any, error) {
 	var g map[string]any
-	if client != nil && isUIWorkflow(raw) {
+	if client != nil && IsUIWorkflow(raw) {
 		if cg, err := client.ConvertWorkflow(ctx, raw); err == nil && catalog.FirstUUIDClass(cg) == "" {
 			g = cg
 		}
@@ -37,7 +37,7 @@ func ConvertWith(ctx context.Context, client *comfy.Client, raw json.RawMessage,
 }
 
 func Convert(raw json.RawMessage, info map[string]comfy.NodeDef) (map[string]any, error) {
-	if isUIWorkflow(raw) {
+	if IsUIWorkflow(raw) {
 		expanded, err := expandUIWorkflow(raw)
 		if err != nil {
 			return nil, err
@@ -82,9 +82,9 @@ func Convert(raw json.RawMessage, info map[string]comfy.NodeDef) (map[string]any
 			continue
 		}
 		if catalog.IsUUIDClass(n.Type) {
-			return nil, fmt.Errorf("unexpanded subgraph node %s (class_type %s)", nodeIDString(n.ID), n.Type)
+			return nil, fmt.Errorf("unexpanded subgraph node %s (class_type %s)", NodeIDString(n.ID), n.Type)
 		}
-		nid := nodeIDString(n.ID)
+		nid := NodeIDString(n.ID)
 		inputs := map[string]any{}
 		linked := map[string]bool{}
 		for _, inp := range n.Inputs {
@@ -95,7 +95,7 @@ func Convert(raw json.RawMessage, info map[string]comfy.NodeDef) (map[string]any
 			if !ok || len(l) < 5 {
 				continue
 			}
-			from := nodeIDString(l[1])
+			from := NodeIDString(l[1])
 			slot := int(asFloat(l[2]))
 			inputs[inp.Name] = []any{from, slot}
 			linked[inp.Name] = true
@@ -113,7 +113,7 @@ func Convert(raw json.RawMessage, info map[string]comfy.NodeDef) (map[string]any
 	return out, nil
 }
 
-func isUIWorkflow(raw json.RawMessage) bool {
+func IsUIWorkflow(raw json.RawMessage) bool {
 	var probe struct {
 		Nodes json.RawMessage `json:"nodes"`
 		Links json.RawMessage `json:"links"`
@@ -178,13 +178,13 @@ func applyWidgets(inputs map[string]any, linked map[string]bool, n uiNode, info 
 		return
 	}
 	def, ok := info[n.Type]
-	names := widgetNames(def)
+	names := WidgetNames(def)
 	if !ok || len(names) == 0 {
 		names = widgetNamesFromNode(n)
 	}
 	wi := 0
 	for _, name := range names {
-		for wi < len(arr) && isControlWidget(arr[wi]) {
+		for wi < len(arr) && IsControlWidget(arr[wi]) {
 			wi++
 		}
 		if linked[name] {
@@ -203,7 +203,7 @@ func applyWidgets(inputs map[string]any, linked map[string]bool, n uiNode, info 
 	}
 }
 
-func widgetNames(def comfy.NodeDef) []string {
+func WidgetNames(def comfy.NodeDef) []string {
 	var names []string
 	for _, group := range []string{"required", "optional"} {
 		order := def.InputOrder[group]

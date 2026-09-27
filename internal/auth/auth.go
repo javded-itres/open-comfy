@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
-	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -44,9 +43,9 @@ type Service struct {
 	disabled bool
 	keys     []Key
 
-	mu      sync.Mutex
-	rpm     map[string]*rpmBucket
-	fails   map[string]*failBucket
+	mu       sync.Mutex
+	rpm      map[string]*rpmBucket
+	fails    map[string]*failBucket
 	inflight map[string]int
 }
 
@@ -70,15 +69,14 @@ func HashKey(plain string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func Bearer(r *http.Request) string {
-	h := r.Header.Get("Authorization")
-	if strings.HasPrefix(strings.ToLower(h), "bearer ") {
+// BearerToken reads an API key from an Authorization value or X-Api-Key.
+// The HTTP adapter passes the header strings; this package does not import net/http.
+func BearerToken(authorization, apiKey string) string {
+	h := strings.TrimSpace(authorization)
+	if len(h) >= 7 && strings.EqualFold(h[:7], "bearer ") {
 		return strings.TrimSpace(h[7:])
 	}
-	if k := r.Header.Get("X-Api-Key"); k != "" {
-		return k
-	}
-	return ""
+	return strings.TrimSpace(apiKey)
 }
 
 func Load(path string, extraPlain []string, disabled bool) (*Service, error) {
@@ -202,13 +200,13 @@ func (s *Service) AllowModel(k Key, model string) bool {
 	return false
 }
 
-func ClientIP(r *http.Request) string {
-	if r == nil || r.RemoteAddr == "" {
+func ClientHost(remoteAddr string) string {
+	if remoteAddr == "" {
 		return ""
 	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	host, _, err := net.SplitHostPort(remoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		return remoteAddr
 	}
 	return host
 }

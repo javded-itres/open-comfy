@@ -11,6 +11,8 @@ import (
 	"unicode"
 
 	"github.com/javded-itres/open-comfy/internal/comfy"
+	"github.com/javded-itres/open-comfy/internal/importwf/analyze"
+	"github.com/javded-itres/open-comfy/internal/importwf/hf"
 )
 
 type ProvisionRequest struct {
@@ -76,7 +78,7 @@ func AnalyzeNamed(ctx context.Context, client *comfy.Client, name string, allow 
 	if err != nil {
 		return Analysis{}, err
 	}
-	a := Analyze(raw, info, allow, modelsDir)
+	a := analyze.Analyze(raw, info, allow, modelsDir)
 	a.Name = name
 	return a, nil
 }
@@ -111,9 +113,9 @@ func Provision(ctx context.Context, client *comfy.Client, req ProvisionRequest, 
 	if err != nil {
 		return out, err
 	}
-	out.Analysis = Analyze(raw, info, cfg.Allowlist, cfg.ModelsDir)
+	out.Analysis = analyze.Analyze(raw, info, cfg.Allowlist, cfg.ModelsDir)
 	out.Name = name
-	modelMap := mergeHFMap(cfg.ModelMap, collectHFMap(raw))
+	modelMap := hf.MergeHFMap(cfg.ModelMap, hf.CollectHFMap(raw))
 	if req.InstallNodes && cfg.CustomNodesDir != "" {
 		installed, skipped, reboot := installAllowlisted(ctx, cfg.CustomNodesDir, out.Allowlisted)
 		out.Installed = installed
@@ -129,7 +131,11 @@ func Provision(ctx context.Context, client *comfy.Client, req ProvisionRequest, 
 		if cfg.ModelsDir == "" {
 			out.Errors = append(out.Errors, "comfyui.models_dir is empty; Hugging Face download disabled")
 		} else if cfg.Downloads != nil {
-			job := cfg.Downloads.Start(ctx, out.MissingModels, HFOpts{
+			refs := make([]hf.WeightRef, 0, len(out.MissingModels))
+			for _, m := range out.MissingModels {
+				refs = append(refs, hf.WeightRef{Value: m.Value, Field: m.Field, Class: m.Class})
+			}
+			job := cfg.Downloads.Start(ctx, refs, hf.HFOpts{
 				ModelsDir: cfg.ModelsDir,
 				Token:     cfg.HFToken,
 				Allow:     cfg.HFAllow,
@@ -156,7 +162,7 @@ func installAllowlisted(ctx context.Context, dir string, packs []NodeNeed) (inst
 			continue
 		}
 		seen[git] = true
-		dest := filepath.Join(dir, packName(git))
+		dest := filepath.Join(dir, analyze.PackName(git))
 		if st, err := os.Stat(dest); err == nil && st.IsDir() {
 			skipped = append(skipped, dest+" (exists; restart ComfyUI if class is still missing)")
 			reboot = true

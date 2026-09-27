@@ -1,4 +1,4 @@
-package importwf
+package hf
 
 import (
 	"io/fs"
@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-func normalizeModelPath(value string) string {
+func NormalizeModelPath(value string) string {
 	value = strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
 	if value == "" {
 		return ""
@@ -21,7 +21,7 @@ func normalizeModelPath(value string) string {
 }
 
 func findLocalWeight(roots []string, want, preferFolder string) string {
-	want = normalizeModelPath(want)
+	want = NormalizeModelPath(want)
 	if want == "" || strings.Contains(want, "..") {
 		return ""
 	}
@@ -100,7 +100,7 @@ func pathHasDir(p, folder string) bool {
 }
 
 func expectedDest(modelsDir, class, field, value string) string {
-	value = normalizeModelPath(value)
+	value = NormalizeModelPath(value)
 	if value == "" {
 		return filepath.Join(modelsDir, modelFolder(class, field))
 	}
@@ -138,7 +138,7 @@ func linkOrReuse(found, dest string) error {
 	return os.Link(found, dest)
 }
 
-func reuseLocalModel(modelsDir, class, field, value string) (found, dest string, ok bool) {
+func ReuseLocalModel(modelsDir, class, field, value string) (found, dest string, ok bool) {
 	if modelsDir == "" {
 		return "", "", false
 	}

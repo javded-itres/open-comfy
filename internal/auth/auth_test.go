@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -49,14 +48,10 @@ func TestRPMTumbling(t *testing.T) {
 }
 
 func TestBearer(t *testing.T) {
-	r, _ := http.NewRequest("GET", "/", nil)
-	r.Header.Set("Authorization", "Bearer sk-abc")
-	if Bearer(r) != "sk-abc" {
-		t.Fatal(Bearer(r))
+	if BearerToken("Bearer sk-abc", "") != "sk-abc" {
+		t.Fatal(BearerToken("Bearer sk-abc", ""))
 	}
-	r.Header.Del("Authorization")
-	r.Header.Set("X-Api-Key", "sk-xyz")
-	if Bearer(r) != "sk-xyz" {
-		t.Fatal(Bearer(r))
+	if BearerToken("", "sk-xyz") != "sk-xyz" {
+		t.Fatal(BearerToken("", "sk-xyz"))
 	}
 }

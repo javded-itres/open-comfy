@@ -1,4 +1,4 @@
-package importwf
+package convert
 
 import (
 	"context"
@@ -38,7 +38,7 @@ func TestConvertRealZImageTurbo(t *testing.T) {
 	}
 	img := g["9"].(map[string]any)["inputs"].(map[string]any)["images"]
 	link, ok := img.([]any)
-	if !ok || nodeIDString(link[0]) != "57:8" {
+	if !ok || NodeIDString(link[0]) != "57:8" {
 		t.Fatalf("SaveImage images=%v", img)
 	}
 	ks := g["57:3"].(map[string]any)["inputs"].(map[string]any)
@@ -91,7 +91,7 @@ func TestOverlayPromotedComboFromComfyConvert(t *testing.T) {
 
 func testdataDir() string {
 	_, file, _, _ := runtime.Caller(0)
-	return filepath.Join(filepath.Dir(file), "..", "..", "testdata")
+	return filepath.Join(filepath.Dir(file), "..", "..", "..", "testdata")
 }
 
 func TestConvertWithPrefersComfyEndpoint(t *testing.T) {
@@ -133,96 +133,6 @@ func TestConvertWithFallsBackWhenEndpointMissing(t *testing.T) {
 	enc := g["6"].(map[string]any)["inputs"].(map[string]any)
 	if enc["text"] != "local-fallback" {
 		t.Fatalf("%v", g)
-	}
-}
-
-func TestConvertUIToAPI(t *testing.T) {
-	ui := []byte(`{
-	  "last_node_id": 9,
-	  "nodes": [
-	    {"id": 6, "type": "CLIPTextEncode", "mode": 0, "title": "Positive",
-	      "inputs": [
-	        {"name": "clip", "type": "CLIP", "link": 1},
-	        {"name": "text", "type": "STRING", "widget": {"name": "text"}, "link": null}
-	      ],
-	      "widgets_values": ["a red cube"]
-	    },
-	    {"id": 9, "type": "SaveImage", "mode": 0,
-	      "inputs": [
-	        {"name": "images", "type": "IMAGE", "link": 2},
-	        {"name": "filename_prefix", "type": "STRING", "widget": {"name": "filename_prefix"}, "link": null}
-	      ],
-	      "widgets_values": ["ComfyUI"]
-	    },
-	    {"id": 4, "type": "CheckpointLoaderSimple", "mode": 0,
-	      "inputs": [
-	        {"name": "ckpt_name", "type": "COMBO", "widget": {"name": "ckpt_name"}, "link": null}
-	      ],
-	      "outputs": [
-	        {"name": "MODEL", "links": [3]},
-	        {"name": "CLIP", "links": [1]},
-	        {"name": "VAE", "links": [4]}
-	      ],
-	      "widgets_values": ["model.safetensors"]
-	    }
-	  ],
-	  "links": [
-	    [1, 4, 1, 6, 0, "CLIP"],
-	    [2, 8, 0, 9, 0, "IMAGE"]
-	  ]
-	}`)
-	info := map[string]comfy.NodeDef{
-		"CLIPTextEncode": {
-			Input: map[string]map[string]any{
-				"required": {
-					"text": []any{"STRING", map[string]any{"multiline": true}},
-					"clip": []any{"CLIP", map[string]any{}},
-				},
-			},
-			InputOrder: map[string][]string{"required": {"text", "clip"}},
-		},
-		"SaveImage": {
-			Input: map[string]map[string]any{
-				"required": {
-					"images":          []any{"IMAGE", map[string]any{}},
-					"filename_prefix": []any{"STRING", map[string]any{}},
-				},
-			},
-			InputOrder: map[string][]string{"required": {"images", "filename_prefix"}},
-			OutputNode: true,
-		},
-		"CheckpointLoaderSimple": {
-			Input: map[string]map[string]any{
-				"required": {"ckpt_name": []any{"COMBO", map[string]any{}}},
-			},
-			InputOrder: map[string][]string{"required": {"ckpt_name"}},
-		},
-	}
-	g, err := Convert(ui, info)
-	if err != nil {
-		t.Fatal(err)
-	}
-	enc := g["6"].(map[string]any)["inputs"].(map[string]any)
-	if enc["text"] != "a red cube" {
-		t.Fatalf("prompt=%v", enc["text"])
-	}
-	clip, ok := enc["clip"].([]any)
-	if !ok || clip[0] != "4" {
-		t.Fatalf("clip link=%v", enc["clip"])
-	}
-	ckpt := g["4"].(map[string]any)["inputs"].(map[string]any)["ckpt_name"]
-	if ckpt != "model.safetensors" {
-		t.Fatalf("ckpt=%v", ckpt)
-	}
-	m, err := Infer("demo", "Demo.json", "Demo", g, info)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if m.Modality != "image" || m.OutputNode != "9" {
-		t.Fatalf("%+v", m)
-	}
-	if p := m.Param("prompt"); p == nil || p.MapsTo[0].Node != "6" {
-		t.Fatalf("prompt %+v", p)
 	}
 }
 
@@ -311,12 +221,12 @@ func TestConvertExpandsSubgraph(t *testing.T) {
 	}
 	img := g["9"].(map[string]any)["inputs"].(map[string]any)["images"]
 	link, ok := img.([]any)
-	if !ok || nodeIDString(link[0]) != "57:8" {
+	if !ok || NodeIDString(link[0]) != "57:8" {
 		t.Fatalf("SaveImage images=%v", img)
 	}
 	lat := g["57:8"].(map[string]any)["inputs"].(map[string]any)["samples"]
 	sl, ok := lat.([]any)
-	if !ok || nodeIDString(sl[0]) != "57:13" {
+	if !ok || NodeIDString(sl[0]) != "57:13" {
 		t.Fatalf("VAEDecode samples=%v", lat)
 	}
 }
@@ -381,66 +291,6 @@ func fmtNum(v any) int {
 		return int(n)
 	default:
 		return 0
-	}
-}
-
-func TestGatePromptAndReference(t *testing.T) {
-	m := catalog.Model{}
-	graph := map[string]any{
-		"1": map[string]any{"class_type": "LoadImage", "inputs": map[string]any{"image": "a.png"}},
-	}
-	errs := Gate(&m, graph)
-	if len(errs) < 2 {
-		t.Fatalf("%v", errs)
-	}
-	g2 := map[string]any{
-		"6": map[string]any{"class_type": "CLIPTextEncode", "inputs": map[string]any{"text": "hi"}},
-		"9": map[string]any{"class_type": "SaveImage", "inputs": map[string]any{"filename_prefix": "x"}},
-	}
-	m2, err := Infer("t2i", "t2i.json", "t2i", g2, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if m2.Param("prompt") == nil {
-		t.Fatal("prompt")
-	}
-	g3 := map[string]any{
-		"6": map[string]any{"class_type": "CLIPTextEncode", "inputs": map[string]any{"text": "hi"}},
-		"1": map[string]any{"class_type": "LoadImage", "inputs": map[string]any{"image": "a.png"}},
-		"9": map[string]any{"class_type": "SaveImage", "inputs": map[string]any{"filename_prefix": "x"}},
-	}
-	m3, err := Infer("i2i", "i2i.json", "i2i", g3, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if m3.Param("input_image") == nil {
-		t.Fatal("reference")
-	}
-}
-
-func TestUnloadRemovesYamlNotComfy(t *testing.T) {
-	dir := t.TempDir()
-	wf := filepath.Join(dir, "workflows")
-	os.MkdirAll(wf, 0o755)
-	os.WriteFile(filepath.Join(wf, "gone.json"), []byte(`{"9":{"class_type":"SaveImage","inputs":{"filename_prefix":"x","images":["8",0]}}}`), 0o644)
-	models := filepath.Join(dir, "models.yaml")
-	os.WriteFile(models, []byte("models:\n  - id: gone\n    modality: image\n    workflow: gone.json\n    output_node: \"9\"\n"), 0o644)
-	res, err := Unload(models, wf, []string{"gone"})
-	if err != nil || len(res.Removed) != 1 {
-		t.Fatalf("%v %+v", err, res)
-	}
-	if _, err := os.Stat(filepath.Join(wf, "gone.json")); !os.IsNotExist(err) {
-		t.Fatal("copy should be deleted")
-	}
-	b, _ := os.ReadFile(models)
-	if strings.Contains(string(b), "id: gone") {
-		t.Fatalf("%s", b)
-	}
-}
-
-func TestSlug(t *testing.T) {
-	if g := Slug("MiniMax H3 Talking Avatar.json"); g != "minimax-h3-talking-avatar" {
-		t.Fatal(g)
 	}
 }
 

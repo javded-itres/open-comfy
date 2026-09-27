@@ -23,6 +23,7 @@ import (
 	"github.com/javded-itres/open-comfy/internal/files"
 	"github.com/javded-itres/open-comfy/internal/importwf"
 	"github.com/javded-itres/open-comfy/internal/jobs"
+	"github.com/javded-itres/open-comfy/internal/queue"
 )
 
 var png1 = mustDec("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
@@ -129,7 +130,9 @@ func testServer(t *testing.T, comfyURL string) (*Server, string) {
 	cl := comfy.New(comfyURL, "", "cid", nil, 5*time.Second, 20*time.Millisecond, false)
 	js := jobs.New(cfg.Jobs.Dir, time.Hour)
 	fs := files.New(cfg.Files.Dir, secret, time.Hour, cfg.Origin)
-	s := New(&cfg, a, cat, cl, js, fs)
+	dl := importwf.NewDownloads()
+	dl.SetStore(filepath.Join(dir, "downloads"), time.Hour)
+	s := New(&cfg, a, cat, cl, js, fs, queue.New(cfg.ComfyUI.MaxInFlight, cfg.ComfyUI.MaxWaiting), dl)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	s.StartWorkers(ctx)

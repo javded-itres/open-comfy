@@ -1,4 +1,4 @@
-package importwf
+package convert
 
 import (
 	"encoding/json"
@@ -32,7 +32,7 @@ func expandUIWorkflow(raw json.RawMessage) (json.RawMessage, error) {
 	if err := json.Unmarshal(raw, &root); err != nil {
 		return nil, err
 	}
-	defs := subgraphDefs(root)
+	defs := SubgraphDefs(root)
 	if len(defs) == 0 {
 		return raw, nil
 	}
@@ -57,12 +57,12 @@ func expandUIWorkflow(raw json.RawMessage) (json.RawMessage, error) {
 			}
 			typ, _ := nm["type"].(string)
 			def, isSG := defs[typ]
-			if !isSG || !catalogUUID(typ) {
+			if !isSG || !CatalogUUID(typ) {
 				next = append(next, n)
 				continue
 			}
 			changed = true
-			outerID := nodeIDString(nm["id"])
+			outerID := NodeIDString(nm["id"])
 			innerNodes, innerLinks, inMap, outMap, err := explodeSubgraph(nm, def, outerID, &maxLink, usedIDs)
 			if err != nil {
 				return nil, err
@@ -116,7 +116,7 @@ func expandUIWorkflow(raw json.RawMessage) (json.RawMessage, error) {
 }
 
 func findInst(list []subgraphInst, id any) (subgraphInst, bool) {
-	want := nodeIDString(id)
+	want := NodeIDString(id)
 	for _, it := range list {
 		if it.outerID == want {
 			return it, true
@@ -128,7 +128,7 @@ func findInst(list []subgraphInst, id any) (subgraphInst, bool) {
 func explodeSubgraph(instance, def map[string]any, outerID string, maxLink *int, usedIDs map[int]bool) (nodes []any, links []linkRec, inMap map[int][]linkRec, outMap map[int]linkRec, err error) {
 	inMap = map[int][]linkRec{}
 	outMap = map[int]linkRec{}
-	values := instanceValues(instance)
+	values := InstanceValues(instance)
 	sgInputs, _ := def["inputs"].([]any)
 	sgOutputs, _ := def["outputs"].([]any)
 	innerNodes, _ := def["nodes"].([]any)
@@ -144,7 +144,7 @@ func explodeSubgraph(instance, def map[string]any, outerID string, maxLink *int,
 		if !ok {
 			continue
 		}
-		old := nodeIDString(nm["id"])
+		old := NodeIDString(nm["id"])
 		if old == strconv.Itoa(subgraphInputNodeID) || old == strconv.Itoa(subgraphOutputNodeID) {
 			continue
 		}
@@ -159,7 +159,7 @@ func explodeSubgraph(instance, def map[string]any, outerID string, maxLink *int,
 		if isIONode(id) {
 			return id
 		}
-		s := nodeIDString(id)
+		s := NodeIDString(id)
 		if n, ok := idMap[s]; ok {
 			return n
 		}
@@ -175,7 +175,7 @@ func explodeSubgraph(instance, def map[string]any, outerID string, maxLink *int,
 		if usedIDs[id] {
 			*maxLink++
 			id = *maxLink
-			patchInputLink(nodes, nodeIDString(target), l.TargetSlot, id)
+			patchInputLink(nodes, NodeIDString(target), l.TargetSlot, id)
 		}
 		usedIDs[id] = true
 		if id > *maxLink {
@@ -220,7 +220,7 @@ func explodeSubgraph(instance, def map[string]any, outerID string, maxLink *int,
 			rec := linkRec{TargetID: target, TargetSlot: l.TargetSlot, Type: l.Type}
 			inMap[outerSlot] = append(inMap[outerSlot], rec)
 			if v, ok := values[name]; ok {
-				applyPromotedValue(nodes, nodeIDString(target), l.TargetSlot, name, v)
+				applyPromotedValue(nodes, NodeIDString(target), l.TargetSlot, name, v)
 			}
 		}
 	}
@@ -243,7 +243,7 @@ func explodeSubgraph(instance, def map[string]any, outerID string, maxLink *int,
 func patchInputLink(nodes []any, nid string, slot, newID int) {
 	for _, n := range nodes {
 		nm, _ := n.(map[string]any)
-		if nodeIDString(nm["id"]) != nid {
+		if NodeIDString(nm["id"]) != nid {
 			continue
 		}
 		inputs, ok := nm["inputs"].([]any)
@@ -273,7 +273,7 @@ func overlaySubgraphPromoted(ui json.RawMessage, graph map[string]any) {
 	if json.Unmarshal(ui, &root) != nil {
 		return
 	}
-	defs := subgraphDefs(root)
+	defs := SubgraphDefs(root)
 	if len(defs) == 0 {
 		return
 	}
@@ -289,14 +289,14 @@ func overlaySubgraphPromotedNodes(nodes any, prefix string, defs map[string]map[
 		}
 		typ, _ := nm["type"].(string)
 		def, ok := defs[typ]
-		if !ok || !catalogUUID(typ) {
+		if !ok || !CatalogUUID(typ) {
 			continue
 		}
-		outerID := nodeIDString(nm["id"])
+		outerID := NodeIDString(nm["id"])
 		if prefix != "" {
 			outerID = prefix + ":" + outerID
 		}
-		values := instanceValues(nm)
+		values := InstanceValues(nm)
 		if len(values) == 0 {
 			continue
 		}
@@ -304,7 +304,7 @@ func overlaySubgraphPromotedNodes(nodes any, prefix string, defs map[string]map[
 		for _, in := range asAnySlice(def["nodes"]) {
 			im, _ := in.(map[string]any)
 			if im != nil {
-				innerByID[nodeIDString(im["id"])] = im
+				innerByID[NodeIDString(im["id"])] = im
 			}
 		}
 		linkByID := map[int]linkRec{}
@@ -323,7 +323,7 @@ func overlaySubgraphPromotedNodes(nodes any, prefix string, defs map[string]map[
 				if !ok || isIONode(l.TargetID) {
 					continue
 				}
-				innerLocal := nodeIDString(l.TargetID)
+				innerLocal := NodeIDString(l.TargetID)
 				field := name
 				if inode := innerByID[innerLocal]; inode != nil {
 					if s := inputNameAtSlot(inode, l.TargetSlot); s != "" {
@@ -373,7 +373,7 @@ func setAPIScalar(graph map[string]any, nid, field string, value any) {
 func applyPromotedValue(nodes []any, nid string, slot int, fallbackName string, value any) {
 	for _, n := range nodes {
 		nm, _ := n.(map[string]any)
-		if nodeIDString(nm["id"]) != nid {
+		if NodeIDString(nm["id"]) != nid {
 			continue
 		}
 		name := fallbackName
@@ -397,7 +397,7 @@ func applyPromotedValue(nodes []any, nid string, slot int, fallbackName string, 
 	}
 }
 
-func instanceValues(node map[string]any) map[string]any {
+func InstanceValues(node map[string]any) map[string]any {
 	out := map[string]any{}
 	if named, ok := node["widgets_values_named"].(map[string]any); ok {
 		for k, v := range named {
@@ -427,7 +427,7 @@ func instanceValues(node map[string]any) map[string]any {
 				name = s
 			}
 		}
-		for wi < len(arr) && isControlWidget(arr[wi]) {
+		for wi < len(arr) && IsControlWidget(arr[wi]) {
 			wi++
 		}
 		if wi >= len(arr) {
@@ -441,7 +441,7 @@ func instanceValues(node map[string]any) map[string]any {
 	return out
 }
 
-func subgraphDefs(root map[string]any) map[string]map[string]any {
+func SubgraphDefs(root map[string]any) map[string]map[string]any {
 	out := map[string]map[string]any{}
 	defs, _ := root["definitions"].(map[string]any)
 	if defs == nil {
@@ -517,14 +517,14 @@ func leftoverUUIDNode(nodes any) string {
 	for _, n := range arr {
 		nm, _ := n.(map[string]any)
 		typ, _ := nm["type"].(string)
-		if catalogUUID(typ) {
-			return nodeIDString(nm["id"])
+		if CatalogUUID(typ) {
+			return NodeIDString(nm["id"])
 		}
 	}
 	return ""
 }
 
-func catalogUUID(s string) bool {
+func CatalogUUID(s string) bool {
 	if len(s) != 36 {
 		return false
 	}
@@ -536,7 +536,7 @@ func isIONode(id any) bool {
 	return n == subgraphInputNodeID || n == subgraphOutputNodeID
 }
 
-func nodeIDString(v any) string {
+func NodeIDString(v any) string {
 	switch t := v.(type) {
 	case nil:
 		return ""
@@ -580,7 +580,7 @@ func cloneMap(m map[string]any) map[string]any {
 	return out
 }
 
-func isControlWidget(v any) bool {
+func IsControlWidget(v any) bool {
 	s, ok := v.(string)
 	if !ok {
 		return false

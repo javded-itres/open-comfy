@@ -128,7 +128,7 @@ func Defaults() Config {
 		},
 		ModelsFile:   filepath.Join(etc, "models.yaml"),
 		WorkflowsDir: filepath.Join(etc, "workflows"),
-		Version:      "0.1.0",
+		Version:      "0.1.1",
 	}
 }
 

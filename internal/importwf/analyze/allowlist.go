@@ -1,4 +1,4 @@
-package importwf
+package analyze
 
 import (
 	"encoding/json"
@@ -88,7 +88,7 @@ func LookupPack(classType string) (pack, git string, ok bool) {
 	if !ok {
 		return "", "", false
 	}
-	return packName(git), git, true
+	return PackName(git), git, true
 }
 
 func nodeClassMap() map[string]string {
@@ -170,7 +170,7 @@ func normalizeGit(s string) string {
 	return s
 }
 
-func packName(git string) string {
+func PackName(git string) string {
 	git = strings.TrimSuffix(git, ".git")
 	if i := strings.LastIndex(git, "/"); i >= 0 {
 		return git[i+1:]

@@ -1,4 +1,4 @@
-package importwf
+package hf
 
 import (
 	"context"
@@ -78,12 +78,12 @@ type DLJobView struct {
 }
 
 type Downloads struct {
-	mu             sync.Mutex
-	jobs           map[string]*DLJob
-	maxConcurrent  int
-	limiter        chan struct{}
-	storeDir       string
-	storeTTL       time.Duration
+	mu            sync.Mutex
+	jobs          map[string]*DLJob
+	maxConcurrent int
+	limiter       chan struct{}
+	storeDir      string
+	storeTTL      time.Duration
 }
 
 func NewDownloads() *Downloads {
@@ -224,7 +224,15 @@ type HFOpts struct {
 	ModelMap  map[string]string
 }
 
-func (d *Downloads) Start(ctx context.Context, missing []ModelNeed, opt HFOpts) *DLJob {
+// WeightRef is the slice of a missing weight that the downloader needs.
+// Analysis keeps the richer ModelNeed; callers map into this.
+type WeightRef struct {
+	Value string
+	Field string
+	Class string
+}
+
+func (d *Downloads) Start(ctx context.Context, missing []WeightRef, opt HFOpts) *DLJob {
 	j := &DLJob{ID: ids.New("hf_"), Status: DLQueued}
 	for _, m := range missing {
 		j.Items = append(j.Items, DLItem{
@@ -313,7 +321,7 @@ func downloadOne(ctx context.Context, j *DLJob, i int, it *DLItem, opt HFOpts) e
 	}
 	it.Dest = dest
 	it.ModelType = modelFolder(it.Class, it.Field)
-	if found, linked, ok := reuseLocalModel(opt.ModelsDir, it.Class, it.Field, it.Value); ok {
+	if found, linked, ok := ReuseLocalModel(opt.ModelsDir, it.Class, it.Field, it.Value); ok {
 		it.Local = found
 		it.Dest = linked
 		if st, err := os.Stat(linked); err == nil {

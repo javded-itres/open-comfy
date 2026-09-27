@@ -1,4 +1,4 @@
-package importwf
+package hf
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 
 func TestCollectHFMapFromMarkdown(t *testing.T) {
 	raw := json.RawMessage(`{"nodes":[{"type":"MarkdownNote","widgets_values":["see [unet](https://huggingface.co/Comfy-Org/FLUX.1-Krea-dev_ComfyUI/resolve/main/split_files/diffusion_models/flux1-krea-dev_fp8_scaled.safetensors) and https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors"]}]}`)
-	got := collectHFMap(raw)
+	got := CollectHFMap(raw)
 	if got["flux1-krea-dev_fp8_scaled.safetensors"] != "Comfy-Org/FLUX.1-Krea-dev_ComfyUI:split_files/diffusion_models/flux1-krea-dev_fp8_scaled.safetensors" {
 		t.Fatalf("%+v", got)
 	}
