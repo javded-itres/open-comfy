@@ -194,6 +194,33 @@ func TestHealthAndAuth(t *testing.T) {
 	}
 }
 
+func TestImportLoginGate(t *testing.T) {
+	cu := mockComfy(t)
+	defer cu.Close()
+	s, key := testServer(t, cu.URL)
+	h := s.Handler()
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest("GET", "/import", nil))
+	if rr.Code != 401 {
+		t.Fatalf("want 401 without key, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "login-form") {
+		t.Fatal("expected login page body")
+	}
+
+	rr = httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/import", nil)
+	req.Header.Set("Authorization", "Bearer "+key)
+	h.ServeHTTP(rr, req)
+	if rr.Code != 200 {
+		t.Fatalf("want 200 with key, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "Import ComfyUI workflows") {
+		t.Fatal("expected import page body")
+	}
+}
+
 func TestImagesB64(t *testing.T) {
 	cu := mockComfy(t)
 	defer cu.Close()

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>OpenComfy — вход в import</title>
+  <style>
+    html { color-scheme: dark; }
+    body { font: 15px/1.45 system-ui, sans-serif; margin: 0; background: #0f0f0f; color: #d4d4d4; }
+    .wrap { max-width: 440px; margin: 8vh auto 0; padding: 0 1rem; }
+    .card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px; padding: 1.5rem 1.4rem; }
+    h1 { font-size: 1.15rem; margin: 0 0 .3rem; color: #ffffff; }
+    p.meta { color: #8a8a8a; font-size: 13px; margin: .3rem 0 1.2rem; }
+    label { display: block; font-size: 13px; color: #8a8a8a; margin-bottom: .4rem; }
+    input[type=password] { width: 100%; box-sizing: border-box; padding: .7rem .8rem; border-radius: 8px; border: 1px solid #2a2a2a; background: #0f0f0f; color: #d4d4d4; font-size: 15px; }
+    input[type=password]:focus { outline: none; border-color: #4caf50; }
+    .row { display: flex; gap: .6rem; align-items: center; margin-top: 1rem; }
+    button { padding: .7rem 1rem; border-radius: 8px; border: 0; background: #4caf50; color: #0f0f0f; font-weight: 600; font-size: 15px; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: default; }
+    .err { color: #f87171; font-size: 13px; margin-top: .6rem; min-height: 1em; }
+    .hint { color: #6a6a6a; font-size: 12px; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Вход в import</h1>
+      <p class="meta">Требуется API-ключ для доступа к панели импорта ComfyUI.</p>
+      <form id="login-form">
+        <label for="key">API-ключ</label>
+        <input id="key" type="password" placeholder="sk-…" autocomplete="off" autofocus/>
+        <div class="row">
+          <button id="submit" type="submit">Войти</button>
+        </div>
+        <div id="err" class="err"></div>
+      </form>
+      <div class="hint">Ключ принимается по <code>Authorization: Bearer</code> или <code>X-Api-Key</code>.</div>
+    </div>
+  </div>
+  <script>
+    const keyEl = document.getElementById("key");
+    const errEl = document.getElementById("err");
+    const form = document.getElementById("login-form");
+    const submit = document.getElementById("submit");
+
+    function headers() {
+      const h = { "Content-Type": "application/json" };
+      const k = keyEl.value.trim();
+      if (k) h["Authorization"] = "Bearer " + k;
+      return h;
+    }
+
+    async function authenticate() {
+      const k = keyEl.value.trim();
+      if (!k) { errEl.textContent = "Введите API-ключ"; return false; }
+      submit.disabled = true;
+      errEl.textContent = "";
+      try {
+        const r = await fetch("/v1/models", { headers: headers() });
+        if (r.ok) {
+          sessionStorage.setItem("opencomfy_key", k);
+          location.href = "/import";
+          return true;
+        }
+        if (r.status === 401) errEl.textContent = "Неверный API-ключ";
+        else if (r.status === 429) errEl.textContent = "Слишком много попыток, попробуйте позже";
+        else errEl.textContent = "Ошибка авторизации (" + r.status + ")";
+        return false;
+      } catch (e) {
+        errEl.textContent = "Не удалось связаться с сервером";
+        return false;
+      } finally {
+        submit.disabled = false;
+      }
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      await authenticate();
+    });
+  </script>
+</body>
+</html>

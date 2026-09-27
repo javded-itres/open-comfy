@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/javded-itres/open-comfy/internal/auth"
 	"github.com/javded-itres/open-comfy/internal/catalog"
 	"github.com/javded-itres/open-comfy/internal/importwf"
 )
@@ -15,7 +16,18 @@ import (
 //go:embed import_page.html
 var importHTML []byte
 
+//go:embed login_page.html
+var loginHTML []byte
+
 func (s *Server) importPage(w http.ResponseWriter, r *http.Request) {
+	plain := auth.BearerToken(r.Header.Get("Authorization"), r.Header.Get("X-Api-Key"))
+	if _, ok := s.Auth.Lookup(plain); !ok {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(401)
+		_, _ = w.Write(loginHTML)
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(importHTML)
