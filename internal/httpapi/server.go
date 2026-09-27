@@ -147,9 +147,11 @@ func (s *Server) protect(mux *http.ServeMux, pattern string, h http.HandlerFunc)
 		k, ok := s.Auth.Lookup(plain)
 		if !ok {
 			if s.Auth.NoteFail(ip) {
+				s.Log.Printf("auth: blocked ip=%s pattern=%s (failed auth attempts)", ip, pattern)
 				writeError(w, 429, "rate_limit_error", "rate_limit_exceeded", "too many failed auth attempts", "")
 				return
 			}
+			s.Log.Printf("auth: invalid key ip=%s pattern=%s", ip, pattern)
 			writeError(w, 401, "invalid_request_error", "invalid_api_key", "invalid api key", "")
 			return
 		}
