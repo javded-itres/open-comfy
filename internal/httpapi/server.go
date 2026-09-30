@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,6 +37,10 @@ type Server struct {
 
 	videoCh chan string
 	once    sync.Once
+
+	qmu  sync.Mutex
+	qat  time.Time
+	qids []string
 }
 
 func New(cfg *config.Config, a *auth.Service, cat *catalog.Catalog, c *comfy.Client, j *jobs.Store, f *files.Store, admit *queue.Admission, dl *importwf.Downloads) *Server {
@@ -78,6 +83,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /openapi.yaml", s.openapiYAMLHandler)
 	mux.HandleFunc("GET /openapi.json", s.openapiJSON)
 	mux.HandleFunc("GET /import", s.importPage)
+	mux.HandleFunc("POST /import/session", s.importSession)
 
 	s.protect(mux, "GET /v1/models", s.listModels)
 	s.protect(mux, "GET /models", s.listModels)
@@ -89,6 +95,10 @@ func (s *Server) Handler() http.Handler {
 	s.protect(mux, "POST /images/generations", s.images)
 	s.protect(mux, "POST /v1/images", s.images)
 	s.protect(mux, "POST /images", s.images)
+	s.protect(mux, "GET /v1/images/generations/{id}", s.getImage)
+	s.protect(mux, "GET /images/generations/{id}", s.getImage)
+	s.protect(mux, "GET /v1/images/{id}", s.getImage)
+	s.protect(mux, "GET /images/{id}", s.getImage)
 
 	s.protect(mux, "POST /v1/videos", s.createVideo)
 	s.protect(mux, "POST /videos", s.createVideo)
@@ -155,18 +165,33 @@ func (s *Server) protect(mux *http.ServeMux, pattern string, h http.HandlerFunc)
 			writeError(w, 401, "invalid_request_error", "invalid_api_key", "invalid api key", "")
 			return
 		}
-		rate, allowed := s.Auth.AllowRPM(k.Hash, k.RPM)
-		w.Header().Set("X-RateLimit-Limit-Requests", strconv.Itoa(rate.Limit))
-		w.Header().Set("X-RateLimit-Remaining-Requests", strconv.Itoa(rate.Remaining))
-		w.Header().Set("X-RateLimit-Reset-Requests", strconv.FormatInt(rate.Reset, 10))
-		if !allowed {
-			w.Header().Set("Retry-After", "60")
-			writeError(w, 429, "rate_limit_error", "rate_limit_exceeded", "rate limit exceeded", "")
+		if k.RPM > 0 && !statusPoll(r) {
+			rate, allowed := s.Auth.AllowRPM(k.Hash, k.RPM)
+			w.Header().Set("X-RateLimit-Limit-Requests", strconv.Itoa(rate.Limit))
+			w.Header().Set("X-RateLimit-Remaining-Requests", strconv.Itoa(rate.Remaining))
+			w.Header().Set("X-RateLimit-Reset-Requests", strconv.FormatInt(rate.Reset, 10))
+			if !allowed {
+				w.Header().Set("Retry-After", "60")
+				writeError(w, 429, "rate_limit_error", "rate_limit_exceeded", "rate limit exceeded", "")
+				return
+			}
+			r = r.WithContext(context.WithValue(r.Context(), keyPrincipal, principal{Key: k, Rate: rate}))
+			h(w, r)
 			return
 		}
-		r = r.WithContext(context.WithValue(r.Context(), keyPrincipal, principal{Key: k, Rate: rate}))
+		r = r.WithContext(context.WithValue(r.Context(), keyPrincipal, principal{Key: k}))
 		h(w, r)
 	})
+}
+
+// statusPoll is the import page's 2s refresh. It must not spend the key's RPM
+// or a 429 is drawn as "нет активных загрузок" and the list flickers.
+func statusPoll(r *http.Request) bool {
+	if r.Method != http.MethodGet {
+		return false
+	}
+	p := r.URL.Path
+	return p == "/v1/comfy/downloads" || p == "/v1/comfy/queue" || strings.HasPrefix(p, "/v1/comfy/downloads/")
 }
 
 func (s *Server) principal(r *http.Request) principal {

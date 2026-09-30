@@ -187,20 +187,123 @@ func applyWidgets(inputs map[string]any, linked map[string]bool, n uiNode, info 
 		for wi < len(arr) && IsControlWidget(arr[wi]) {
 			wi++
 		}
-		if linked[name] {
-			wi++
-			continue
-		}
 		if wi >= len(arr) {
 			break
 		}
-		if _, exists := inputs[name]; exists {
+		val := arr[wi]
+		wi++
+		if !linked[name] {
+			if _, exists := inputs[name]; !exists {
+				inputs[name] = val
+			}
+		}
+		spec := widgetSpec(def, name)
+		key, _ := val.(string)
+		if s, ok := inputs[name].(string); ok && s != "" {
+			key = s
+		}
+		for _, child := range dynamicChildNames(spec, key) {
+			for wi < len(arr) && IsControlWidget(arr[wi]) {
+				wi++
+			}
+			if wi >= len(arr) {
+				break
+			}
+			full := name + "." + child
+			if !linked[full] {
+				inputs[full] = arr[wi]
+			}
 			wi++
+		}
+	}
+}
+
+func widgetSpec(def comfy.NodeDef, name string) any {
+	for _, group := range []string{"required", "optional"} {
+		if def.Input[group] == nil {
 			continue
 		}
-		inputs[name] = arr[wi]
-		wi++
+		if spec, ok := def.Input[group][name]; ok {
+			return spec
+		}
 	}
+	return nil
+}
+
+// FieldSpec is the object_info spec for a widget, including a dynamic-combo
+// child addressed as parent.child (sampling_mode.temperature).
+func FieldSpec(def comfy.NodeDef, name string) any {
+	if spec := widgetSpec(def, name); isWidgetSpec(spec) {
+		return spec
+	}
+	parent, child, ok := strings.Cut(name, ".")
+	if !ok || child == "" {
+		return nil
+	}
+	parentSpec := widgetSpec(def, parent)
+	if !isWidgetSpec(parentSpec) {
+		return nil
+	}
+	if spec := dynamicChildSpecAny(parentSpec, child); isWidgetSpec(spec) {
+		return spec
+	}
+	return nil
+}
+
+func dynamicChildSpecAny(spec any, child string) any {
+	arr, ok := spec.([]any)
+	if !ok || len(arr) < 2 {
+		return nil
+	}
+	meta, _ := arr[1].(map[string]any)
+	options, _ := meta["options"].([]any)
+	for _, opt := range options {
+		om, _ := opt.(map[string]any)
+		key, _ := om["key"].(string)
+		if key == "" {
+			continue
+		}
+		if s := dynamicChildSpec(spec, key, child); isWidgetSpec(s) {
+			return s
+		}
+	}
+	return nil
+}
+
+// ValuesFromWidgets reads a positional widgets_values list in definition order.
+// Dynamic-combo children use the same slots as the canvas.
+func ValuesFromWidgets(arr []any, def comfy.NodeDef) map[string]any {
+	inputs := map[string]any{}
+	if len(arr) == 0 {
+		return inputs
+	}
+	applyWidgets(inputs, map[string]bool{}, uiNode{Widgets: mustJSON(arr)}, map[string]comfy.NodeDef{"": def})
+	return inputs
+}
+
+func dynamicChildNames(spec any, key string) []string {
+	arr, ok := spec.([]any)
+	if !ok || len(arr) < 2 || key == "" {
+		return nil
+	}
+	meta, ok := arr[1].(map[string]any)
+	if !ok {
+		return nil
+	}
+	if ord, ok := meta["_oc_order"].(map[string]any); ok {
+		if raw, ok := ord[key].([]any); ok {
+			var names []string
+			for _, n := range raw {
+				if s, ok := n.(string); ok && s != "" {
+					names = append(names, s)
+				}
+			}
+			if len(names) > 0 {
+				return names
+			}
+		}
+	}
+	return nil
 }
 
 func WidgetNames(def comfy.NodeDef) []string {
@@ -249,11 +352,13 @@ func isWidgetSpec(spec any) bool {
 	case []any:
 		return true // combo options list
 	case string:
-		switch strings.ToUpper(t) {
+		u := strings.ToUpper(t)
+		switch u {
 		case "INT", "FLOAT", "STRING", "BOOLEAN", "COMBO", "NUMBER":
 			return true
 		default:
-			return false
+			// COMFY_DYNAMICCOMBO_V3 and later combo widgets.
+			return strings.Contains(u, "COMBO")
 		}
 	default:
 		return false

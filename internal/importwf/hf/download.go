@@ -2,6 +2,7 @@ package hf
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -63,11 +64,12 @@ type DLItem struct {
 }
 
 type DLJob struct {
-	ID     string
-	Status DLStatus
-	Items  []DLItem
-	Error  string
-	mu     sync.Mutex
+	ID          string
+	Status      DLStatus
+	Items       []DLItem
+	Error       string
+	lastPersist time.Time
+	mu          sync.Mutex
 }
 
 type DLJobView struct {
@@ -272,8 +274,41 @@ func (d *Downloads) run(parent context.Context, j *DLJob, opt HFOpts) {
 
 	var failed int
 	for i := range j.Items {
+		j.mu.Lock()
+		done := j.Items[i].Status == DLDone
+		if !done {
+			j.Items[i].Status = DLRunning
+		}
+		j.mu.Unlock()
+		if done {
+			continue
+		}
+		d.maybePersist(j)
 		acquire()
-		err := downloadOne(ctx, j, i, &j.Items[i], opt)
+		var err error
+		var last int64
+		for attempt := 0; attempt < 8; attempt++ {
+			err = downloadOne(ctx, d, j, i, &j.Items[i], opt)
+			if err == nil || ctx.Err() != nil {
+				break
+			}
+			j.mu.Lock()
+			got := j.Items[i].Bytes
+			j.Items[i].Error = err.Error()
+			j.mu.Unlock()
+			d.maybePersist(j)
+			if attempt > 0 && got <= last {
+				break
+			}
+			last = got
+			timer := time.NewTimer(time.Duration(attempt+1) * 5 * time.Second)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				err = ctx.Err()
+			case <-timer.C:
+			}
+		}
 		release()
 		if err != nil {
 			j.Items[i].Status = DLFailed
@@ -311,7 +346,24 @@ func (j *DLJob) Snapshot() DLJobView {
 	}
 }
 
-func downloadOne(ctx context.Context, j *DLJob, i int, it *DLItem, opt HFOpts) error {
+func (d *Downloads) ResumeIncomplete(opt HFOpts) {
+	if d == nil {
+		return
+	}
+	d.mu.Lock()
+	var pending []*DLJob
+	for _, j := range d.jobs {
+		if j.Status == DLQueued || j.Status == DLRunning {
+			pending = append(pending, j)
+		}
+	}
+	d.mu.Unlock()
+	for _, j := range pending {
+		go d.run(context.Background(), j, opt)
+	}
+}
+
+func downloadOne(ctx context.Context, d *Downloads, j *DLJob, i int, it *DLItem, opt HFOpts) error {
 	if opt.ModelsDir == "" {
 		return fmt.Errorf("comfyui.models_dir is empty")
 	}
@@ -347,7 +399,14 @@ func downloadOne(ctx context.Context, j *DLJob, i int, it *DLItem, opt HFOpts) e
 	if opt.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+opt.Token)
 	}
-	cl := &http.Client{Timeout: 0}
+	tmp := dest + ".part"
+	var resume int64
+	if st, err := os.Stat(tmp); err == nil && st.Size() > 0 {
+		resume = st.Size()
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", resume))
+	}
+	// Hugging Face drops long HTTP/2 bodies with CANCEL. HTTP/1.1 keeps the .part usable.
+	cl := &http.Client{Timeout: 0, Transport: hfTransport}
 	resp, err := cl.Do(req)
 	if err != nil {
 		return err
@@ -357,48 +416,65 @@ func downloadOne(ctx context.Context, j *DLJob, i int, it *DLItem, opt HFOpts) e
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 400))
 		return fmt.Errorf("download %s: %s", resp.Status, b)
 	}
-	it.Total = resolveContentLength(u, resp, opt.Token)
-	tmp := dest + ".part"
-	var resume int64
-	if st, err := os.Stat(tmp); err == nil {
-		resume = st.Size()
+	// A 200 means the server ignored Range and sent the file from byte 0.
+	if resume > 0 && resp.StatusCode != http.StatusPartialContent {
+		resume = 0
+	}
+	clen := resolveContentLength(u, resp, opt.Token)
+	if resume > 0 && clen > 0 {
+		it.Total = resume + clen
+	} else if clen > 0 {
+		it.Total = clen
 	}
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
-	if resume > 0 {
-		if _, err := f.Seek(resume, io.SeekStart); err != nil {
+	if resume == 0 {
+		if err := f.Truncate(0); err != nil {
 			_ = f.Close()
 			return err
 		}
+	} else if _, err := f.Seek(resume, io.SeekStart); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if j != nil {
+		j.mu.Lock()
+		j.Items[i].Bytes = resume
+		j.mu.Unlock()
 	}
 	// Live per-chunk progress: progress wraps resp.Body and reports cumulative
 	// bytes as io.Copy reads them, so the UI shows progress while the download
-	// runs instead of only at completion. Cumulative bytes are clamped to the
-	// resume offset so partial + resumed bytes are reported correctly.
+	// runs instead of only at completion. Cumulative bytes include the .part
+	// prefix when the server honoured Range.
 	progress := &progressReader{r: resp.Body}
 	progress.onChunk = func(cum int64) {
-		if j != nil {
-			j.mu.Lock()
-			if cum > j.Items[i].Bytes {
-				j.Items[i].Bytes = resume + cum
-			}
-			j.mu.Unlock()
+		if j == nil {
+			return
+		}
+		persist := false
+		j.mu.Lock()
+		j.Items[i].Bytes = resume + cum
+		if time.Since(j.lastPersist) > time.Second {
+			j.lastPersist = time.Now()
+			persist = true
+		}
+		j.mu.Unlock()
+		if persist && d != nil {
+			d.maybePersist(j)
 		}
 	}
 	n, err := io.Copy(f, progress)
 	cerr := f.Close()
+	// Keep .part. A dropped connection is resumed with Range on the next attempt.
 	if err != nil {
-		_ = os.Remove(tmp)
 		return err
 	}
 	if ctx.Err() != nil {
-		_ = os.Remove(tmp)
 		return ctx.Err()
 	}
 	if cerr != nil {
-		_ = os.Remove(tmp)
 		return cerr
 	}
 	if j != nil {
@@ -411,6 +487,14 @@ func downloadOne(ctx context.Context, j *DLJob, i int, it *DLItem, opt HFOpts) e
 		return err
 	}
 	return nil
+}
+
+// hfTransport disables HTTP/2. Large weight downloads otherwise die with
+// "stream error: CANCEL; received from peer" and lose the partial file.
+var hfTransport = &http.Transport{
+	Proxy:             http.ProxyFromEnvironment,
+	ForceAttemptHTTP2: false,
+	TLSNextProto:      map[string]func(string, *tls.Conn) http.RoundTripper{},
 }
 
 // resolveContentLength returns the download size for a HEAD/GET response,

@@ -1,5 +1,5 @@
 MODULE := github.com/javded-itres/open-comfy
-VERSION ?= 0.1.1
+VERSION ?= 0.2.0
 LDFLAGS := -s -w -X main.version=$(VERSION)
 CGO := 0
 

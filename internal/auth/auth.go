@@ -115,7 +115,7 @@ func Load(path string, extraPlain []string, disabled bool) (*Service, error) {
 			Hash:          HashKey(p),
 			Prefix:        ids.KeyPrefix(p),
 			Models:        []string{"*"},
-			RPM:           60,
+			RPM:           0,
 			MaxConcurrent: 4,
 			Enabled:       true,
 		})
@@ -138,9 +138,7 @@ func parseKey(k fileKey) (Key, error) {
 	if len(out.Models) == 0 {
 		out.Models = []string{"*"}
 	}
-	if out.RPM <= 0 {
-		out.RPM = 60
-	}
+	// rpm <= 0 means no request cap. A positive value is a tumbling per-minute limit.
 	if out.MaxConcurrent <= 0 {
 		out.MaxConcurrent = 2
 	}
@@ -245,6 +243,9 @@ type Rate struct {
 }
 
 func (s *Service) AllowRPM(hash string, limit int) (Rate, bool) {
+	if limit <= 0 {
+		return Rate{}, true
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()

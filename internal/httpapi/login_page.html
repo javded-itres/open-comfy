@@ -58,6 +58,11 @@
       try {
         const r = await fetch("/v1/models", { headers: headers() });
         if (r.ok) {
+          const sess = await fetch("/import/session", { method: "POST", headers: headers() });
+          if (!sess.ok) {
+            errEl.textContent = "Ключ верный, но сессия не сохранилась (" + sess.status + ")";
+            return false;
+          }
           sessionStorage.setItem("opencomfy_key", k);
           location.href = "/import";
           return true;

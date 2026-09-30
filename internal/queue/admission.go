@@ -34,6 +34,20 @@ func New(maxInFlight, maxWaiting int) *Admission {
 	}
 }
 
+// TryAcquire takes a GPU slot without waiting. ok is false when the slot is taken.
+func (a *Admission) TryAcquire(model string, modelMax int) (func(), bool) {
+	select {
+	case a.gpu <- struct{}{}:
+		if !a.takeModel(model, modelMax) {
+			<-a.gpu
+			return nil, false
+		}
+		return a.release(model), true
+	default:
+		return nil, false
+	}
+}
+
 func (a *Admission) Acquire(ctx context.Context, model string, modelMax int) (func(), error) {
 	select {
 	case a.gpu <- struct{}{}:

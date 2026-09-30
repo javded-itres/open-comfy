@@ -167,7 +167,12 @@ func (s *Server) mcpTools() []map[string]any {
 		},
 		{
 			"name":        "get_video",
-			"description": "Poll an async video job from generate_* until status is completed or failed. Completed JSON includes url.",
+			"description": "Poll an async video job from generate_* until status is completed or failed. Completed JSON includes url. queue_ahead is how many generations run before this one.",
+			"inputSchema": mcpObjSchema(map[string]any{"id": str}, "id"),
+		},
+		{
+			"name":        "get_job",
+			"description": "Poll an image or video job. While status is queued or in_progress, queue_ahead is the number of generations in front. Image jobs include data when completed.",
 			"inputSchema": mcpObjSchema(map[string]any{"id": str}, "id"),
 		},
 	}
@@ -177,7 +182,9 @@ func (s *Server) mcpTools() []map[string]any {
 		desc := fmt.Sprintf("Generate %s with model %s (%s). Required: %s. Images are data URLs (data:image/...;base64,...).",
 			mm.Modality, mm.ID, mm.Name, strings.Join(mm.RequiredNames(), ", "))
 		if mm.Modality == "video" {
-			desc += " Returns a queued job; poll get_video."
+			desc += " Returns a queued job with queue_ahead; poll get_video or get_job."
+		} else {
+			desc += " If ComfyUI is already generating, returns status=queued and queue_ahead instead of pixels; poll get_job."
 		}
 		list = append(list, map[string]any{
 			"name":        mm.ToolName(),
@@ -227,17 +234,9 @@ func (s *Server) mcpCall(r *http.Request, name string, args map[string]any) (any
 		out["tool"] = m.ToolName()
 		return out, nil
 	case "get_video":
-		id, _ := args["id"].(string)
-		if id == "" {
-			return nil, fmt.Errorf("id required")
-		}
-		nr := httptest.NewRequest(http.MethodGet, "/v1/videos/"+id, nil).WithContext(r.Context())
-		rec := httptest.NewRecorder()
-		s.getVideo(rec, nr)
-		if rec.Code >= 400 {
-			return nil, fmt.Errorf("%s", rec.Body.String())
-		}
-		return mcpDecodeBody(rec)
+		return s.mcpPoll(r, args, false)
+	case "get_job":
+		return s.mcpPoll(r, args, true)
 	}
 	if m := s.mcpModelForTool(name); m != nil {
 		if !s.Auth.AllowModel(s.principal(r).Key, m.ID) {
@@ -246,6 +245,28 @@ func (s *Server) mcpCall(r *http.Request, name string, args map[string]any) (any
 		return s.mcpGenerate(r, m, args)
 	}
 	return nil, fmt.Errorf("unknown tool %s", name)
+}
+
+func (s *Server) mcpPoll(r *http.Request, args map[string]any, either bool) (any, error) {
+	id, _ := args["id"].(string)
+	if id == "" {
+		return nil, fmt.Errorf("id required")
+	}
+	path := "/v1/videos/" + id
+	if either && strings.HasPrefix(id, "img_") {
+		path = "/v1/images/" + id
+	}
+	nr := httptest.NewRequest(http.MethodGet, path, nil).WithContext(r.Context())
+	rec := httptest.NewRecorder()
+	if strings.HasPrefix(path, "/v1/images/") {
+		s.getImage(rec, nr)
+	} else {
+		s.getVideo(rec, nr)
+	}
+	if rec.Code >= 400 {
+		return nil, fmt.Errorf("%s", rec.Body.String())
+	}
+	return mcpDecodeBody(rec)
 }
 
 func (s *Server) mcpModelForTool(name string) *catalog.Model {
@@ -363,4 +384,4 @@ func mcpSessionID() string {
 	return hex.EncodeToString(b)
 }
 
-const mcpInstructions = `OpenComfy maps named models to ComfyUI workflows. Call list_models (or get_model) to see required_parameters and the matching generate_* tool. Required image fields (input_image) must be data URLs (data:image/png;base64,...); aliases input_images / input_reference / input_references are accepted. Video generate_* returns a queued job — poll get_video until status=completed (includes url).`
+const mcpInstructions = `OpenComfy maps named models to ComfyUI workflows. Call list_models (or get_model) to see required_parameters and the matching generate_* tool. Required image fields (input_image) must be data URLs (data:image/png;base64,...); aliases input_images / input_reference / input_references are accepted. If ComfyUI is already generating, an image generate_* returns status=queued and queue_ahead (how many generations are in front) — poll get_job until completed. Video generate_* always returns a queued job with queue_ahead; poll get_video or get_job until status=completed (includes url).`

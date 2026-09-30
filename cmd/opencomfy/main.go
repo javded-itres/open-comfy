@@ -27,7 +27,7 @@ import (
 	"github.com/javded-itres/open-comfy/internal/queue"
 )
 
-var version = "0.1.1"
+var version = "0.2.0"
 
 func main() {
 	configPath := flag.String("config", os.Getenv("OPENCOMFY_CONFIG"), "path to config.yaml")
@@ -148,6 +148,19 @@ func main() {
 		storeDir = filepath.Join(os.Getenv("OPENCOMFY_DATA"), "downloads")
 	}
 	dl.SetStore(storeDir, 24*time.Hour)
+	token := ""
+	if env := cfg.ComfyUI.HFTokenEnv; env != "" {
+		token = os.Getenv(env)
+	}
+	if token == "" {
+		token = os.Getenv("HF_TOKEN")
+	}
+	dl.ResumeIncomplete(importwf.HFOpts{
+		ModelsDir: cfg.ComfyUI.ModelsDir,
+		Token:     token,
+		Allow:     cfg.ComfyUI.HFAllowlist,
+		ModelMap:  cfg.ComfyUI.ModelMap,
+	})
 
 	api := httpapi.New(cfg, authSvc, cat, client, jobStore, fileStore, admit, dl)
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

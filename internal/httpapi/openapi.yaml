@@ -546,6 +546,9 @@ components:
           enum: [queued, in_progress, completed, failed, cancelled, expired]
         progress:
           type: integer
+        queue_ahead:
+          type: integer
+          description: generations that run before this job; 0 when it is already running or finished
         url:
           type: string
           description: HMAC file URL; required when status=completed

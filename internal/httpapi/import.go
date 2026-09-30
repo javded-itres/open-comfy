@@ -4,8 +4,10 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/javded-itres/open-comfy/internal/auth"
@@ -19,9 +21,22 @@ var importHTML []byte
 //go:embed login_page.html
 var loginHTML []byte
 
-func (s *Server) importPage(w http.ResponseWriter, r *http.Request) {
+const importCookie = "opencomfy_key"
+
+func (s *Server) importPlain(r *http.Request) string {
 	plain := auth.BearerToken(r.Header.Get("Authorization"), r.Header.Get("X-Api-Key"))
-	if _, ok := s.Auth.Lookup(plain); !ok {
+	if plain != "" {
+		return plain
+	}
+	c, err := r.Cookie(importCookie)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(c.Value)
+}
+
+func (s *Server) importPage(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.Auth.Lookup(s.importPlain(r)); !ok {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(401)
@@ -31,6 +46,42 @@ func (s *Server) importPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(importHTML)
+}
+
+// importSession remembers a key the login page already checked. A browser
+// navigation to /import cannot send Authorization, so the next GET carries
+// this cookie instead.
+func (s *Server) importSession(w http.ResponseWriter, r *http.Request) {
+	ip := auth.ClientHost(r.RemoteAddr)
+	if s.Auth.FailLocked(ip) {
+		writeError(w, 429, "rate_limit_error", "rate_limit_exceeded", "too many failed auth attempts", "")
+		return
+	}
+	plain := auth.BearerToken(r.Header.Get("Authorization"), r.Header.Get("X-Api-Key"))
+	if plain == "" && r.Body != nil {
+		var body struct {
+			Key string `json:"key"`
+		}
+		_ = json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body)
+		plain = strings.TrimSpace(body.Key)
+	}
+	if _, ok := s.Auth.Lookup(plain); !ok {
+		if s.Auth.NoteFail(ip) {
+			writeError(w, 429, "rate_limit_error", "rate_limit_exceeded", "too many failed auth attempts", "")
+			return
+		}
+		writeError(w, 401, "invalid_request_error", "invalid_api_key", "invalid api key", "")
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     importCookie,
+		Value:    plain,
+		Path:     "/",
+		MaxAge:   12 * 3600,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) analyzeComfyWorkflow(w http.ResponseWriter, r *http.Request) {

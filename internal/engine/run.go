@@ -46,7 +46,7 @@ type Runner interface {
 	View(ctx context.Context, a comfy.Artifact) ([]byte, error)
 }
 
-func Run(ctx context.Context, client Runner, cat *catalog.Catalog, m *catalog.Model, req workflow.Request, promptID string, onProgress func(pct int, pos int)) (Result, comfy.PromptResult, error) {
+func Run(ctx context.Context, client Runner, cat *catalog.Catalog, m *catalog.Model, req workflow.Request, promptID string, onProgress func(pct int, pos int, promptID string)) (Result, comfy.PromptResult, error) {
 	graph, err := catalog.LoadGraph(cat.WorkflowsDir, m.Workflow)
 	if err != nil {
 		return Result{}, comfy.PromptResult{}, err
@@ -89,6 +89,9 @@ func Run(ctx context.Context, client Runner, cat *catalog.Catalog, m *catalog.Mo
 	if err != nil {
 		return Result{}, pr, err
 	}
+	if onProgress != nil {
+		onProgress(5, -1, pr.ReturnedID)
+	}
 	pollID := pr.ReturnedID
 	ticker := time.NewTicker(client.PollInterval())
 	defer ticker.Stop()
@@ -110,7 +113,7 @@ func Run(ctx context.Context, client Runner, cat *catalog.Catalog, m *catalog.Mo
 				if pos > 0 {
 					pct = 15
 				}
-				onProgress(pct, pos)
+				onProgress(pct, pos, pollID)
 			}
 			h, err := client.History(ctx, pollID)
 			if err != nil {

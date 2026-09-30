@@ -24,9 +24,17 @@ OpenAI fields plus `negative_prompt`, `seed`, `width`/`height`. `stream: true` �
 
 Default `response_format`: `b64_json` if `public_base_url` is empty, else HMAC `url`.
 
+If ComfyUI is already generating (or another OpenComfy job is active), the call does **not** wait. It returns **200**:
+
+```json
+{"id":"img_…","object":"image","status":"queued","queue_ahead":2,"polling_url":"http://127.0.0.1:8788/v1/images/img_…"}
+```
+
+`queue_ahead` is how many generations run before this one (ComfyUI's queue plus local jobs not submitted yet). Poll `GET /v1/images/{id}` until `completed`; then `data` is the usual `b64_json` or `url` array. A free GPU still returns the OpenAI image object directly.
+
 ## Videos
 
-`POST /v1/videos` always **200** `{status: queued}` unless 256 active jobs (then 429).
+`POST /v1/videos` always **200** `{status: queued, queue_ahead}` unless 256 active jobs (then 429). `queue_ahead` is how many generations run before this job.
 
 `GET /v1/videos/{id}` on `completed` includes absolute HMAC `url` (holix-media does not call `/content`).
 

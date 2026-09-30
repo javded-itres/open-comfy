@@ -12,6 +12,7 @@ import (
 
 	"github.com/javded-itres/open-comfy/internal/comfy"
 	"github.com/javded-itres/open-comfy/internal/importwf/analyze"
+	"github.com/javded-itres/open-comfy/internal/importwf/convert"
 	"github.com/javded-itres/open-comfy/internal/importwf/hf"
 )
 
@@ -102,18 +103,28 @@ func Provision(ctx context.Context, client *comfy.Client, req ProvisionRequest, 
 		}
 		raw = got
 	}
-	if req.Save || req.Overwrite || len(req.Workflow) > 0 {
-		if err := client.PutUserWorkflow(ctx, name, raw, req.Overwrite || req.Save); err != nil {
-			return out, err
-		}
-		out.Saved = true
-		out.Path = "workflows/" + name
-	}
 	info, err := client.ObjectInfo(ctx)
 	if err != nil {
 		return out, err
 	}
 	out.Analysis = analyze.Analyze(raw, info, cfg.Allowlist, cfg.ModelsDir)
+	raw = analyze.ApplyComboPaths(raw, out.ReusedModels)
+	if req.Save || req.Overwrite || len(req.Workflow) > 0 {
+		toSave := raw
+		// An API prompt has no canvas. ComfyUI still lists the file and opens a blank graph.
+		if !convert.IsUIWorkflow(raw) {
+			ui, err := convert.RenderUIFromRaw(raw, info)
+			if err != nil {
+				return out, fmt.Errorf("build canvas: %w", err)
+			}
+			toSave = ui
+		}
+		if err := client.PutUserWorkflow(ctx, name, toSave, req.Overwrite || req.Save); err != nil {
+			return out, err
+		}
+		out.Saved = true
+		out.Path = "workflows/" + name
+	}
 	out.Name = name
 	modelMap := hf.MergeHFMap(cfg.ModelMap, hf.CollectHFMap(raw))
 	if req.InstallNodes && cfg.CustomNodesDir != "" {

@@ -47,6 +47,28 @@ func TestRPMTumbling(t *testing.T) {
 	}
 }
 
+func TestRPMUnlimited(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "keys.yaml")
+	plain := "sk-live-unlimited000000000000"
+	if err := os.WriteFile(p, []byte("keys:\n  - name: a\n    key: "+plain+"\n    rpm: 0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Load(p, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k, ok := s.Lookup(plain)
+	if !ok || k.RPM != 0 {
+		t.Fatalf("rpm %d ok %v", k.RPM, ok)
+	}
+	for i := 0; i < 100; i++ {
+		if _, ok := s.AllowRPM(k.Hash, k.RPM); !ok {
+			t.Fatal(i)
+		}
+	}
+}
+
 func TestBearer(t *testing.T) {
 	if BearerToken("Bearer sk-abc", "") != "sk-abc" {
 		t.Fatal(BearerToken("Bearer sk-abc", ""))

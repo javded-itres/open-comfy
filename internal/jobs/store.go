@@ -33,9 +33,11 @@ type Job struct {
 	ComfyPromptID     string         `json:"comfy_prompt_id"`
 	QueuePosition     int            `json:"queue_position"`
 	FileID            string         `json:"file_id"`
+	FileIDs           []string       `json:"file_ids,omitempty"`
 	MIME              string         `json:"mime"`
 	Error             *JobError      `json:"error"`
 	CreatedAt         int64          `json:"created_at"`
+	Seq               int64          `json:"seq,omitempty"`
 	CompletedAt       *int64         `json:"completed_at"`
 	ExpiresAt         int64          `json:"expires_at"`
 	InputPath         string         `json:"input_path,omitempty"`
@@ -52,6 +54,7 @@ type Store struct {
 	ttl time.Duration
 
 	mu    sync.Mutex
+	seq   int64
 	locks map[string]*sync.Mutex
 }
 
@@ -75,6 +78,12 @@ func (s *Store) path(id string) string {
 }
 
 func (s *Store) Put(j *Job) error {
+	if j.Seq == 0 {
+		s.mu.Lock()
+		s.seq++
+		j.Seq = s.seq
+		s.mu.Unlock()
+	}
 	lk := s.lock(j.ID)
 	lk.Lock()
 	defer lk.Unlock()
@@ -176,6 +185,32 @@ func (s *Store) ListByHash(hash string) ([]*Job, error) {
 		}
 	}
 	return out, nil
+}
+
+func (s *Store) Active() []*Job {
+	ents, err := os.ReadDir(s.dir)
+	if err != nil {
+		return nil
+	}
+	var out []*Job
+	for _, e := range ents {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(s.dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		var j Job
+		if json.Unmarshal(b, &j) != nil {
+			continue
+		}
+		if j.Status == Queued || j.Status == InProgress {
+			cp := j
+			out = append(out, &cp)
+		}
+	}
+	return out
 }
 
 func (s *Store) CountActive() int {

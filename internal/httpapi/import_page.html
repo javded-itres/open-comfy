@@ -306,9 +306,12 @@
       let data = [];
       try {
         const r = await fetch("/v1/comfy/downloads", { headers: headers() });
+        if (!r.ok) return;
         const j = await r.json();
         data = j.data || [];
-      } catch (e) {}
+      } catch (e) {
+        return;
+      }
       if (!data.length) {
         document.getElementById("dl-list").innerHTML = "<p class='meta'>нет активных загрузок</p>";
         return;

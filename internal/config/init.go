@@ -46,7 +46,7 @@ func InitFiles(configPath string) (plainKey string, err error) {
 			b := make([]byte, 16)
 			_, _ = rand.Read(b)
 			plainKey = "sk-" + hex.EncodeToString(b)
-			body = fmt.Sprintf("keys:\n  - name: default\n    key: %s\n    models: [\"*\"]\n    rpm: 30\n    max_concurrent: 2\n    enabled: true\n", plainKey)
+			body = fmt.Sprintf("keys:\n  - name: default\n    key: %s\n    models: [\"*\"]\n    rpm: 0\n    max_concurrent: 2\n    enabled: true\n", plainKey)
 		}
 		if err := os.WriteFile(w.path, []byte(body), w.mode); err != nil {
 			return "", err

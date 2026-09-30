@@ -102,8 +102,19 @@ func Analyze(raw json.RawMessage, info map[string]comfy.NodeDef, allow []string,
 		if len(opts) == 0 && !looksLikeWeightFile(m.Value) {
 			continue
 		}
-		if len(opts) > 0 && comboHas(opts, m.Value) {
-			continue
+		if len(opts) > 0 {
+			exact, resolved := resolveCombo(opts, m.Value)
+			if exact {
+				continue
+			}
+			// ComfyUI accepts only the listed path. A file in a subfolder
+			// (vae/qwen/qwen_image_vae.safetensors) is on disk, but the bare
+			// name in the workflow is still rejected until it is rewritten.
+			if resolved != "" {
+				m.Local = resolved
+				a.ReusedModels = append(a.ReusedModels, m)
+				continue
+			}
 		}
 		if modelsDir != "" {
 			if found, dest, ok := hf.ReuseLocalModel(modelsDir, m.Class, m.Field, m.Value); ok {
@@ -222,26 +233,11 @@ func instanceValuesDef(node map[string]any, def comfy.NodeDef) map[string]any {
 	if len(out) > 0 {
 		return out
 	}
-	names := convert.WidgetNames(def)
-	if len(names) == 0 {
-		return out
-	}
 	arr, ok := node["widgets_values"].([]any)
 	if !ok {
 		return out
 	}
-	wi := 0
-	for _, name := range names {
-		for wi < len(arr) && convert.IsControlWidget(arr[wi]) {
-			wi++
-		}
-		if wi >= len(arr) {
-			break
-		}
-		out[name] = arr[wi]
-		wi++
-	}
-	return out
+	return convert.ValuesFromWidgets(arr, def)
 }
 
 func widgetStringList(node map[string]any) []string {
@@ -342,20 +338,79 @@ func stringList(v any) []string {
 	return out
 }
 
-func comboHas(opts []string, val string) bool {
+// resolveCombo reports an exact list hit, or the single list entry whose
+// basename matches. Two different subpaths for the same filename are not a hit.
+func resolveCombo(opts []string, val string) (exact bool, resolved string) {
 	for _, o := range opts {
 		if o == val {
-			return true
+			return true, o
 		}
 	}
 	base := val
 	if i := strings.LastIndex(val, "/"); i >= 0 {
 		base = val[i+1:]
 	}
+	var hits []string
+	seen := map[string]bool{}
 	for _, o := range opts {
 		if o == base || strings.HasSuffix(o, "/"+base) {
-			return true
+			if !seen[o] {
+				seen[o] = true
+				hits = append(hits, o)
+			}
 		}
 	}
-	return false
+	if len(hits) == 1 {
+		return false, hits[0]
+	}
+	return false, ""
+}
+
+// ApplyComboPaths rewrites weight names to the path ComfyUI already lists.
+func ApplyComboPaths(raw json.RawMessage, models []ModelNeed) json.RawMessage {
+	repl := map[string]string{}
+	for _, m := range models {
+		if m.Local == "" || m.Local == m.Value || strings.Contains(m.Local, "→") || strings.HasPrefix(m.Local, "/") {
+			continue
+		}
+		repl[m.Value] = m.Local
+	}
+	if len(repl) == 0 || len(raw) == 0 {
+		return raw
+	}
+	var v any
+	if json.Unmarshal(raw, &v) != nil {
+		return raw
+	}
+	replaceStrings(v, repl)
+	b, err := json.Marshal(v)
+	if err != nil {
+		return raw
+	}
+	return b
+}
+
+func replaceStrings(v any, repl map[string]string) {
+	switch t := v.(type) {
+	case map[string]any:
+		for k, val := range t {
+			if s, ok := val.(string); ok {
+				if n, ok := repl[s]; ok {
+					t[k] = n
+					continue
+				}
+			}
+			replaceStrings(val, repl)
+		}
+	case []any:
+		for i, val := range t {
+			if s, ok := val.(string); ok {
+				if n, ok := repl[s]; ok {
+					t[i] = n
+					continue
+				}
+			}
+			replaceStrings(val, repl)
+		}
+	}
 }

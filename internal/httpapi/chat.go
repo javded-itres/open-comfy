@@ -47,7 +47,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	b, _ := json.Marshal(gen)
-	nr := r.Clone(r.Context())
+	nr := r.Clone(withSyncGen(r.Context()))
 	nr.Body = io.NopCloser(bytes.NewReader(b))
 	nr.Header.Set("Content-Type", "application/json")
 	cw := &capture{ResponseWriter: w, code: 200, buf: &bytes.Buffer{}}

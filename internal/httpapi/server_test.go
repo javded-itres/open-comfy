@@ -42,6 +42,10 @@ func testdata() string {
 }
 
 func mockComfy(t *testing.T) *httptest.Server {
+	return mockComfyOpt(t, `{"queue_running":[],"queue_pending":[]}`, nil)
+}
+
+func mockComfyOpt(t *testing.T, queue string, holdPrompt <-chan struct{}) *httptest.Server {
 	t.Helper()
 	var mu sync.Mutex
 	files := map[string][]byte{}
@@ -72,10 +76,13 @@ func mockComfy(t *testing.T) *httptest.Server {
 		case r.URL.Path == "/system_stats":
 			w.Write([]byte(`{}`))
 		case r.URL.Path == "/prompt" && r.Method == http.MethodPost:
+			if holdPrompt != nil {
+				<-holdPrompt
+			}
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{"prompt_id":"comfy-uuid-1"}`))
+			w.Write([]byte(`{"prompt_id":"11111111-1111-1111-1111-111111111111"}`))
 		case r.URL.Path == "/queue":
-			w.Write([]byte(`{"queue_running":[],"queue_pending":[]}`))
+			w.Write([]byte(queue))
 		case strings.HasPrefix(r.URL.Path, "/history/"):
 			id := strings.TrimPrefix(r.URL.Path, "/history/")
 			w.Header().Set("Content-Type", "application/json")
@@ -218,6 +225,75 @@ func TestImportLoginGate(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "Import ComfyUI workflows") {
 		t.Fatal("expected import page body")
+	}
+
+	// A browser navigation cannot send Authorization. The login page stores
+	// the key in a cookie, and the next GET /import must open the panel.
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest("POST", "/import/session", nil)
+	req.Header.Set("Authorization", "Bearer "+key)
+	h.ServeHTTP(rr, req)
+	if rr.Code != 204 {
+		t.Fatalf("session status %d %s", rr.Code, rr.Body.String())
+	}
+	cookie := rr.Result().Cookies()
+	if len(cookie) != 1 || cookie[0].Name != "opencomfy_key" || !cookie[0].HttpOnly {
+		t.Fatalf("cookie %#v", cookie)
+	}
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/import", nil)
+	req.AddCookie(cookie[0])
+	h.ServeHTTP(rr, req)
+	if rr.Code != 200 || !strings.Contains(rr.Body.String(), "Import ComfyUI workflows") {
+		t.Fatalf("cookie gate %d %s", rr.Code, rr.Body.String()[:80])
+	}
+}
+
+func TestImageQueuedWhenComfyBusy(t *testing.T) {
+	hold := make(chan struct{})
+	cu := mockComfyOpt(t, `{"queue_running":[["1","aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"]],"queue_pending":[]}`, hold)
+	defer cu.Close()
+	defer close(hold)
+	s, key := testServer(t, cu.URL)
+	h := s.Handler()
+
+	post := func() map[string]any {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"toy-image","prompt":"a cube"}`))
+		req.Header.Set("Authorization", "Bearer "+key)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("status %d %s", rec.Code, rec.Body.String())
+		}
+		var out map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	first := post()
+	if first["status"] != "queued" {
+		t.Fatalf("first %+v", first)
+	}
+	if int(first["queue_ahead"].(float64)) != 1 {
+		t.Fatalf("ahead %+v", first["queue_ahead"])
+	}
+	second := post()
+	if second["status"] != "queued" {
+		t.Fatalf("second %+v", second)
+	}
+	if int(second["queue_ahead"].(float64)) < 2 {
+		t.Fatalf("second ahead %+v", second["queue_ahead"])
+	}
+	id, _ := first["id"].(string)
+	req := httptest.NewRequest(http.MethodGet, "/v1/images/"+id, nil)
+	req.Header.Set("Authorization", "Bearer "+key)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"queue_ahead"`) {
+		t.Fatalf("poll %d %s", rec.Code, rec.Body.String())
 	}
 }
 

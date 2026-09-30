@@ -16,6 +16,17 @@ import (
 	"github.com/javded-itres/open-comfy/internal/workflow"
 )
 
+type syncGenKey struct{}
+
+func withSyncGen(ctx context.Context) context.Context {
+	return context.WithValue(ctx, syncGenKey{}, true)
+}
+
+func forceSync(r *http.Request) bool {
+	v, _ := r.Context().Value(syncGenKey{}).(bool)
+	return v
+}
+
 func (s *Server) images(w http.ResponseWriter, r *http.Request) {
 	p := s.principal(r)
 	body, err := io.ReadAll(s.maxBody(r))
@@ -61,6 +72,13 @@ func (s *Server) images(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request_error", "invalid_value", "n exceeds max", "n")
 		return
 	}
+	req.N = n
+
+	sync := forceSync(r)
+	if !sync && s.generationBusy(r.Context()) {
+		s.enqueueImage(w, r, p, m, req)
+		return
+	}
 
 	if !s.Auth.AcquireKeySlot(p.Key.Hash, p.Key.MaxConcurrent) {
 		w.Header().Set("Retry-After", "5")
@@ -71,15 +89,23 @@ func (s *Server) images(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(m.TimeoutS+15)*time.Second)
 	defer cancel()
-	rel, err := s.Admit.Acquire(ctx, m.ID, m.MaxConcurrent)
-	if errors.Is(err, queue.ErrBusy) {
-		w.Header().Set("Retry-After", "10")
-		writeError(w, 429, "rate_limit_error", "rate_limit_exceeded", "gpu busy", "")
-		return
-	}
-	if err != nil {
-		writeError(w, 504, "timeout", "generation_timeout", "timeout waiting for slot", "")
-		return
+	rel, ok := s.Admit.TryAcquire(m.ID, m.MaxConcurrent)
+	if !ok {
+		if !sync {
+			s.enqueueImage(w, r, p, m, req)
+			return
+		}
+		var err error
+		rel, err = s.Admit.Acquire(ctx, m.ID, m.MaxConcurrent)
+		if errors.Is(err, queue.ErrBusy) {
+			w.Header().Set("Retry-After", "10")
+			writeError(w, 429, "rate_limit_error", "rate_limit_exceeded", "gpu busy", "")
+			return
+		}
+		if err != nil {
+			writeError(w, 504, "timeout", "generation_timeout", "timeout waiting for slot", "")
+			return
+		}
 	}
 	defer rel()
 

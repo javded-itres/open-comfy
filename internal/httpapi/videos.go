@@ -73,11 +73,7 @@ func (s *Server) createVideo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "api_error", "internal_error", err.Error(), "")
 		return
 	}
-	select {
-	case s.videoCh <- id:
-	default:
-		go func() { s.videoCh <- id }()
-	}
+	s.kick(id)
 
 	if wait {
 		capWait := time.Duration(s.Cfg.HTTP.MaxWaitS) * time.Second
@@ -88,18 +84,18 @@ func (s *Server) createVideo(w http.ResponseWriter, r *http.Request) {
 		for time.Now().Before(deadline) {
 			got, err := s.Jobs.Get(id)
 			if err == nil && (got.Status == jobs.Completed || got.Status == jobs.Failed || got.Status == jobs.Cancelled) {
-				s.writeVideo(w, got, p.Key.Hash)
+				s.writeVideo(w, r, got)
 				return
 			}
 			time.Sleep(500 * time.Millisecond)
 		}
 		got, _ := s.Jobs.Get(id)
 		if got != nil {
-			s.writeVideo(w, got, p.Key.Hash)
+			s.writeVideo(w, r, got)
 			return
 		}
 	}
-	s.writeVideo(w, j, p.Key.Hash)
+	s.writeVideo(w, r, j)
 }
 
 func (s *Server) parseVideoReq(r *http.Request) (workflow.Request, bool, error) {
@@ -199,7 +195,10 @@ func (s *Server) listVideos(w http.ResponseWriter, r *http.Request) {
 	list, _ := s.Jobs.ListByHash(p.Key.Hash)
 	var data []map[string]any
 	for _, j := range list {
-		data = append(data, s.videoObj(j))
+		if j.Object != "" && j.Object != "video" {
+			continue
+		}
+		data = append(data, s.videoObj(r.Context(), j))
 	}
 	writeJSON(w, 200, map[string]any{"object": "list", "data": data})
 }
@@ -211,7 +210,7 @@ func (s *Server) getVideo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "invalid_request_error", "not_found", "not found", "")
 		return
 	}
-	s.writeVideo(w, j, p.Key.Hash)
+	s.writeVideo(w, r, j)
 }
 
 func (s *Server) videoContent(w http.ResponseWriter, r *http.Request) {
@@ -260,14 +259,14 @@ func (s *Server) deleteVideo(w http.ResponseWriter, r *http.Request) {
 	if j.FileID != "" {
 		s.Files.Unlink(j.FileID)
 	}
-	s.writeVideo(w, j, p.Key.Hash)
+	s.writeVideo(w, r, j)
 }
 
-func (s *Server) writeVideo(w http.ResponseWriter, j *jobs.Job, _ string) {
-	writeJSON(w, 200, s.videoObj(j))
+func (s *Server) writeVideo(w http.ResponseWriter, r *http.Request, j *jobs.Job) {
+	writeJSON(w, 200, s.videoObj(r.Context(), j))
 }
 
-func (s *Server) videoObj(j *jobs.Job) map[string]any {
+func (s *Server) videoObj(ctx context.Context, j *jobs.Job) map[string]any {
 	st := string(j.Status)
 	if j.ExpiresAt > 0 && time.Now().Unix() > j.ExpiresAt && j.Status == jobs.Completed {
 		st = "expired"
@@ -302,6 +301,7 @@ func (s *Server) videoObj(j *jobs.Job) map[string]any {
 	if origin := s.origin(); origin != "" {
 		out["polling_url"] = origin + "/v1/videos/" + j.ID
 	}
+	out["queue_ahead"] = s.queueAhead(ctx, j)
 	return out
 }
 
@@ -311,6 +311,14 @@ func (s *Server) videoLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case id := <-s.videoCh:
+			j, err := s.Jobs.Get(id)
+			if err != nil {
+				continue
+			}
+			if j.Object == "image" {
+				s.runImage(ctx, id)
+				continue
+			}
 			s.runVideo(ctx, id)
 		}
 	}
@@ -351,7 +359,7 @@ func (s *Server) runVideo(ctx context.Context, id string) {
 
 	tctx, cancel := context.WithTimeout(ctx, time.Duration(m.TimeoutS+15)*time.Second)
 	defer cancel()
-	rel, err := s.Admit.Acquire(tctx, m.ID, m.MaxConcurrent)
+	rel, err := s.acquireSlot(tctx, m.ID, m.MaxConcurrent)
 	if err != nil {
 		_, _ = s.Jobs.Update(id, func(j *jobs.Job) error {
 			j.Status = jobs.Failed
@@ -369,7 +377,7 @@ func (s *Server) runVideo(ctx context.Context, id string) {
 		j.Progress = 10
 		return nil
 	})
-	res, pr, err := engine.Run(tctx, s.Comfy, s.Cat, m, req, id, func(pct, pos int) {
+	res, pr, err := engine.Run(tctx, s.Comfy, s.Cat, m, req, id, func(pct, pos int, promptID string) {
 		_, _ = s.Jobs.Update(id, func(j *jobs.Job) error {
 			if j.Status == jobs.Cancelled {
 				return nil
@@ -377,6 +385,9 @@ func (s *Server) runVideo(ctx context.Context, id string) {
 			j.Status = jobs.InProgress
 			j.Progress = pct
 			j.QueuePosition = pos
+			if promptID != "" {
+				j.ComfyPromptID = promptID
+			}
 			return nil
 		})
 	})

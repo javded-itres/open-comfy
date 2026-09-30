@@ -3,6 +3,7 @@ package analyze
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/javded-itres/open-comfy/internal/comfy"
@@ -126,6 +127,34 @@ func TestAnalyzeSubgraphLoadersWithoutInputWidgets(t *testing.T) {
 	}
 	if got["ae.safetensors"] != "vae_name" {
 		t.Fatalf("vae %+v", a.MissingModels)
+	}
+}
+
+func TestAnalyzeResolvesSubdirVAE(t *testing.T) {
+	info := map[string]comfy.NodeDef{
+		"VAELoader": {
+			Input: map[string]map[string]any{
+				"required": {
+					"vae_name": []any{[]any{"ae.safetensors", "qwen/qwen_image_vae.safetensors"}},
+				},
+			},
+			InputOrder: map[string][]string{"required": {"vae_name"}},
+		},
+	}
+	raw := json.RawMessage(`{"12":{"class_type":"VAELoader","inputs":{"vae_name":"qwen_image_vae.safetensors"}}}`)
+	a := Analyze(raw, info, nil, "")
+	if len(a.MissingModels) != 0 || len(a.ReusedModels) != 1 {
+		t.Fatalf("missing %+v reused %+v", a.MissingModels, a.ReusedModels)
+	}
+	if a.ReusedModels[0].Local != "qwen/qwen_image_vae.safetensors" {
+		t.Fatalf("local %q", a.ReusedModels[0].Local)
+	}
+	out := ApplyComboPaths(raw, a.ReusedModels)
+	if !strings.Contains(string(out), `"qwen/qwen_image_vae.safetensors"`) {
+		t.Fatalf("not rewritten: %s", out)
+	}
+	if strings.Contains(string(out), `"qwen_image_vae.safetensors"`) {
+		t.Fatalf("bare name left: %s", out)
 	}
 }
 

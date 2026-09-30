@@ -33,6 +33,14 @@ func (m *Model) PublicParams() []map[string]any {
 		}
 		out = append(out, item)
 	}
+	if m.Param("size") == nil && m.Param("width") != nil && m.Param("height") != nil {
+		out = append(out, map[string]any{
+			"name":        "size",
+			"type":        "string",
+			"required":    false,
+			"description": "WIDTHxHEIGHT. Mapped to width and height.",
+		})
+	}
 	return out
 }
 

@@ -148,7 +148,8 @@ Keep them boring. Auth takes header strings (`BearerToken`, `ClientHost`), not `
 - Poll interval from config (default 2s). Do not busy-loop `/history`.
 - Sync image holds the HTTP connection until ComfyUI finishes — that is why `WriteTimeout` is 0.
 - Admission: if no slot and waiting is full → **429** + `Retry-After`. Do not unbounded-goroutine `/prompt`.
-- Video: **200 queued** immediately; worker waits for a slot. Completed JSON **must** include an absolute HMAC `url` (`public_base_url` or `http://127.0.0.1:<boundPort>`).
+- If ComfyUI or this process already has a generation in flight, a new image request is stored and **200** `{status: queued, queue_ahead}` is returned immediately. `queue_ahead` counts ComfyUI's queue plus local jobs not yet submitted. Poll `GET /v1/images/{id}`. A free GPU still returns the OpenAI image body in the same call. Chat shim keeps waiting.
+- Video: **200 queued** immediately, including `queue_ahead`; worker waits for a slot. Completed JSON **must** include an absolute HMAC `url` (`public_base_url` or `http://127.0.0.1:<boundPort>`).
 - Walk `models_dir` only for missing weights, skip `.git` / `.part` / empty files. Cache official HF org indexes per process; reset in tests.
 - `CGO_ENABLED=0`, no ORM, no extra HTTP frameworks. Stdlib `net/http` + `gopkg.in/yaml.v3` only unless a dependency is justified in the PR.
 

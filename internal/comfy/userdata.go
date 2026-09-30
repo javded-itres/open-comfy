@@ -86,9 +86,19 @@ type NodeDef struct {
 }
 
 func (c *Client) ObjectInfo(ctx context.Context) (map[string]NodeDef, error) {
-	var wrap map[string]NodeDef
-	if err := c.getJSON(ctx, "/object_info", &wrap); err != nil {
+	resp, err := c.do(ctx, http.MethodGet, "/object_info", nil, "")
+	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("object_info %d: %s", resp.StatusCode, raw)
+	}
+	var wrap map[string]NodeDef
+	if err := json.Unmarshal(raw, &wrap); err != nil {
+		return nil, err
+	}
+	annotateDynamicOrder(wrap, raw)
 	return wrap, nil
 }
